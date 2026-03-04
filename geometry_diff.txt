@@ -1,0 +1,261 @@
+diff --git a/RIFTCast/src/riftcast/_C/src/GeometryModule.cpp b/RIFTCast/src/riftcast/_C/src/GeometryModule.cpp
+index a2787bf..9840857 100644
+--- a/RIFTCast/src/riftcast/_C/src/GeometryModule.cpp
++++ b/RIFTCast/src/riftcast/_C/src/GeometryModule.cpp
+@@ -12,6 +12,7 @@
+ 
+ #include <c10/cuda/CUDAGuard.h>
+ #include <c10/cuda/CUDAStream.h>
++#include <torch/torch.h>
+ 
+ namespace rift
+ {
+@@ -35,7 +36,6 @@ public:
+     atcg::ref_ptr<rift::DatasetImporter> dataloader;
+     uint32_t device_idx;
+ 
+-    // Camera data
+     std::vector<rift::CameraData> cameras;
+     uint32_t primitive_width = 400;
+     atcg::ref_ptr<atcg::Shader> primitive_shader;
+@@ -50,7 +50,6 @@ GeometryModule::Impl::Impl() {}
+ GeometryModule::Impl::~Impl()
+ {
+     if(visual_hull_renderer) visual_hull_renderer->use();
+-    // Manual clean up because the context needs to be destroyed last
+     if(vh_graph) vh_graph.reset();
+     if(primitive_shader) primitive_shader.reset();
+     camera_primitive_buffers.clear();
+@@ -72,8 +71,9 @@ void GeometryModule::Impl::init(const uint32_t device_idx, const atcg::ref_ptr<r
+ 
+     visual_hull_renderer       = atcg::make_ref<atcg::RendererSystem>();
+     visual_hull_shader_manager = atcg::make_ref<atcg::ShaderManagerSystem>();
+-    visual_hull_renderer->init(dataloader->width(),
+-                               dataloader->height(),
++    
++    visual_hull_renderer->init(4608,
++                               5328,
+                                visual_hull_context,
+                                visual_hull_shader_manager);
+     visual_hull_renderer->toggleCulling(false);
+@@ -91,7 +91,6 @@ void GeometryModule::Impl::init(const uint32_t device_idx, const atcg::ref_ptr<r
+     {
+         atcg::ref_ptr<atcg::PerspectiveCamera> cam = cameras[i].cam;
+ 
+-        // Primitive Maps
+         atcg::ref_ptr<atcg::Framebuffer> primitive_buffers =
+             atcg::make_ref<atcg::Framebuffer>(primitive_width, (int)(primitive_width / cam->getAspectRatio()));
+         atcg::TextureSpecification int_spec;
+@@ -120,14 +119,12 @@ void GeometryModule::Impl::renderPrimitiveMaps(const atcg::ref_ptr<atcg::Graph>&
+         return;
+     }
+ 
+-    // Compute primitive map for each camera
+     torch::Tensor host_flags = cam_valid_mask.to(torch::Device(torch::kCPU));
+     for(uint32_t id = 0; id < cameras.size(); ++id)
+     {
+         if(host_flags.index({(int)id}).item<int>() == 0) continue;
+         auto vci_camera = cameras[id].cam;
+ 
+-        // Render depth map
+         auto primitive_buffer = camera_primitive_buffers[id];
+         primitive_buffer->use();
+ 
+@@ -148,8 +145,6 @@ void GeometryModule::Impl::mapPrimitiveMaps(const torch::Tensor& cam_valid)
+     auto host_flags = cam_valid.to(torch::kCPU);
+     for(uint32_t id = 0; id < cameras.size(); ++id)
+     {
+-        // if(host_flags.index({(int)id}).item<int>() == 0) continue;
+-
+         auto primitive_buffer    = camera_primitive_buffers[id];
+         atcg::textureArray array = primitive_buffer->getColorAttachement(0)->getTextureArray();
+ 
+@@ -179,7 +174,7 @@ void GeometryModule::Impl::unmapPrimitiveMaps()
+ {
+     if(!primitive_mapped_vci) return;
+ 
+-    for(int i = 0; i < cameras.size(); ++i)
++    for(int i = 0; i < (int)cameras.size(); ++i)
+     {
+         CUDA_SAFE_CALL(cudaDestroyTextureObject(host_primitive_texture_handles[i]));
+         camera_primitive_buffers[i]->getColorAttachement()->unmapDevicePointers();
+@@ -201,69 +196,114 @@ void GeometryModule::init(const uint32_t device_idx, const atcg::ref_ptr<rift::D
+ }
+ 
+ GeometryReconstruction
+-GeometryModule::compute_geometry(const glm::mat4& model, const torch::Tensor& cam_valid, const uint32_t frame)
++GeometryModule::compute_geometry(const glm::mat4& model, 
++                                 const torch::Tensor& cam_valid, 
++                                 const std::vector<torch::Tensor>& depths,
++                                 const uint32_t frame)
+ {
++    torch::Tensor cpu_valid = torch::ones({(long)impl->cameras.size()}, torch::kInt32);
++    for (size_t i = 0; i < impl->cameras.size(); ++i) {
++        if (!impl->cameras[i].name.empty() && impl->cameras[i].name[0] == 'D') {
++            cpu_valid[i] = 0;
++        }
++    }
++    auto forced_cam_valid = cpu_valid.to(cam_valid.device());
+     GeometryReconstruction reconstruction;
+ 
+     at::cuda::CUDAGuard device_guard(impl->device_idx);
++    torch::NoGradGuard no_grad;
+ 
+     auto torch_stream = at::cuda::getCurrentCUDAStream();
+-
+     impl->visual_hull_renderer->use();
+ 
+-    // Load masks
+-    torch::Tensor masks;
+-
+-    // Decompress masks
+-    auto masks_compressed =
+-        frame == -1 ? impl->dataloader->getMasks(cam_valid) : impl->dataloader->getMasks(frame, cam_valid);
+-    std::array<int, 2> data = {impl->dataloader->height(), impl->dataloader->width()};
+-    masks                   = maskcompression::decompress(masks_compressed, data, impl->dataloader->flip_masks());
+-    masks.unsqueeze_(-1);
+-
+-    // Visual Hull
+-    glm::vec3 lower_corner = model * glm::vec4(-1.0f, -1.0f, -1.0f, 1.0f);
+-    float scale_x          = glm::length(glm::vec3(model[0]));
+-    float scale_y          = glm::length(glm::vec3(model[1]));
+-    float scale_z          = glm::length(glm::vec3(model[2]));
+-    float scale            = glm::max(scale_x, glm::max(scale_y, scale_z));
+-
+-    torch::Tensor valid = cam_valid.to(torch::kBool);
+-    // input_{vertices|faces} tensor are created by the main thread to to OpenGL
++    const int PROCESS_H = 1332;
++    const int PROCESS_W = 1152;
++
++    try {
++        auto loaded_masks = frame == -1 ? impl->dataloader->getMasks(forced_cam_valid) 
++                                        : impl->dataloader->getMasks(frame, forced_cam_valid);
++
++        torch::Tensor masks = torch::stack(loaded_masks).contiguous();
++        torch::Tensor valid = forced_cam_valid.to(torch::kBool);
++        masks = masks.index({valid}).contiguous();
++
+         if(impl->dataloader->enable_smoothing())
+         {
+-        masks = torchhull::gaussian_blur(masks,
+-                                         impl->dataloader->kernel_size(),
+-                                         impl->dataloader->sigma(),
+-                                         true,
+-                                         torch::kFloat32);
++            masks = torchhull::gaussian_blur(masks, impl->dataloader->kernel_size(), impl->dataloader->sigma(), true, torch::kFloat32);
++        }
++
++        auto host_valid = forced_cam_valid.to(torch::kCPU).to(torch::kBool);
++        std::vector<torch::Tensor> valid_depth_tensors;
++        
++        for (int i = 0; i < (int)forced_cam_valid.size(0); ++i) {
++            if (host_valid[i].item<bool>()) {
++                if (i < (int)depths.size() && depths[i].defined() && depths[i].numel() > 100) {
++                    auto d = depths[i].to(masks.device(), torch::kFloat32);
++                    if (d.dim() == 2) d = d.unsqueeze(0).unsqueeze(0); 
++                    else if (d.dim() == 3) d = d.permute({2, 0, 1}).unsqueeze(0);
++                    d = torch::nn::functional::interpolate(d, torch::nn::functional::InterpolateFuncOptions().size(std::vector<int64_t>{PROCESS_H, PROCESS_W}).mode(torch::kNearest));
++                    d = d.squeeze(0).permute({1, 2, 0});
++                    valid_depth_tensors.push_back(d);
++                } else {
++                    valid_depth_tensors.push_back(torch::full({PROCESS_H, PROCESS_W, 1}, 10000.0f, torch::TensorOptions().dtype(torch::kFloat32).device(masks.device())));
++                }
+             }
+-    auto [vertices, faces] = torchhull::visual_hull(masks,    //.index({valid}),
+-                                                    impl->view_projection_tensor.index({valid}),
++        }
++
++        auto stacked_depths = torch::stack(valid_depth_tensors).contiguous();
++
++        // --- THE ABSOLUTE TRUTH FIX ---
++        auto proj_full = impl->view_projection_tensor.index({valid});
++        
++        // 1. Force Transpose (OpenCV to OpenGL alignment)
++        proj_full = proj_full.transpose(-1, -2).contiguous();
++
++        // 2. Meters to Millimeters
++        auto scale_mtx = torch::eye(4, proj_full.options());
++        scale_mtx[0][0] = 0.001f; scale_mtx[1][1] = 0.001f; scale_mtx[2][2] = 0.001f;
++        proj_full = torch::matmul(proj_full, scale_mtx);
++
++        // 3. Absolute Massive Search Volume
++        glm::vec3 lower_corner = glm::vec3(-10000.0f, -10000.0f, -10000.0f);
++        float scale = 20000.0f; // 20 meter search box
++
++        auto [vertices, faces] = torchhull::visual_hull(masks, 
++                                                        stacked_depths, 
++                                                        proj_full,
+                                                         impl->dataloader->level(),
+                                                         {lower_corner.x, lower_corner.y, lower_corner.z},
+                                                         scale * 2.0f,
+-                                                    /*masks_partial=*/impl->dataloader->partial_masks(),
+-                                                    /*transform_convention=*/"opengl",
+-                                                    /*unique=*/true);
++                                                        impl->dataloader->partial_masks(),
++                                                        "opengl",
++                                                        true);
++
++        if (vertices.numel() == 0 || faces.numel() == 0) {
++            std::cerr << "[WARNING] Visual hull returned empty mesh!" << std::endl;
++            reconstruction.vertices = torch::empty({0, 3}, torch::kFloat32);
++            reconstruction.faces = torch::empty({0, 3}, torch::kInt64);
++            reconstruction.normals = torch::empty({0, 3}, torch::kFloat32);
++            reconstruction.visible_primitives = torch::empty({0}, torch::kFloat32);
++            reconstruction.current_frame = impl->dataloader->getLastAvailableFrame();
++            return reconstruction;
++        }
+ 
+         torch::Tensor normals = torch::zeros_like(vertices);
++        torch::Tensor visible_primitives_per_camera = torch::empty({0}, torch::kFloat32);
+ 
+-    torch::Tensor visible_primitives_per_camera;
+         if(vertices.size(0) > 0)
+         {
+             impl->vh_graph->resizeVertices(vertices.size(0));
+             impl->vh_graph->resizeFaces(faces.size(0));
+             impl->vh_graph->getDevicePositions().index_put_({torch::indexing::Slice(), torch::indexing::Slice()}, vertices);
+             impl->vh_graph->getDeviceFaces().index_put_({torch::indexing::Slice(), torch::indexing::Slice()}, faces);
+-
+             torch_stream.synchronize();
+             impl->vh_graph->unmapAllDevicePointers();
+ 
+-        impl->renderPrimitiveMaps(impl->vh_graph, cam_valid);
+-        impl->mapPrimitiveMaps(cam_valid);
++            impl->renderPrimitiveMaps(impl->vh_graph, forced_cam_valid);
++            impl->mapPrimitiveMaps(forced_cam_valid);
++            
+             visible_primitives_per_camera = computeVisiblePrimitivesBatched(impl->primitive_texture_handles,
+-                                                                        cam_valid,
++                                                                            forced_cam_valid,
+                                                                             impl->camera_primitive_buffers[0]->width(),
+                                                                             impl->camera_primitive_buffers[0]->height(),
+                                                                             impl->cameras.size(),
+@@ -273,7 +313,6 @@ GeometryModule::compute_geometry(const glm::mat4& model, const torch::Tensor& ca
+         }
+ 
+         rift::computeVertexNormals(vertices, normals, faces);
+-
+         reconstruction.vertices           = vertices;
+         reconstruction.faces              = faces;
+         reconstruction.normals            = normals;
+@@ -281,10 +320,17 @@ GeometryModule::compute_geometry(const glm::mat4& model, const torch::Tensor& ca
+         reconstruction.current_frame      = impl->dataloader->getLastAvailableFrame();
+ 
+         return reconstruction;
++
++    } catch (const c10::OutOfMemoryError& e) {
++        std::cerr << "\n============================================================" << std::endl;
++        std::cerr << "[CRITICAL] CUDA Out Of Memory!" << std::endl;
++        std::cerr << "============================================================\n" << std::endl;
++        throw e;
++    }
+ }
+ 
+ std::vector<atcg::ref_ptr<atcg::Framebuffer>> GeometryModule::getPrimitiveBuffers() const
+ {
+     return impl->camera_primitive_buffers;
+ }
+-}    // namespace rift
+\ No newline at end of file
++}
+\ No newline at end of file

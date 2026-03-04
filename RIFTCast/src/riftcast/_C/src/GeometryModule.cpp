@@ -201,13 +201,7 @@ GeometryModule::compute_geometry(const glm::mat4& model,
                                  const std::vector<torch::Tensor>& depths,
                                  const uint32_t frame)
 {
-    torch::Tensor cpu_valid = torch::ones({(long)impl->cameras.size()}, torch::kInt32);
-    for (size_t i = 0; i < impl->cameras.size(); ++i) {
-        if (!impl->cameras[i].name.empty() && impl->cameras[i].name[0] == 'D') {
-            cpu_valid[i] = 0;
-        }
-    }
-    auto forced_cam_valid = cpu_valid.to(cam_valid.device());
+    auto forced_cam_valid = cam_valid;
     GeometryReconstruction reconstruction;
 
     at::cuda::CUDAGuard device_guard(impl->device_idx);
@@ -245,34 +239,39 @@ GeometryModule::compute_geometry(const glm::mat4& model,
                     d = d.squeeze(0).permute({1, 2, 0});
                     valid_depth_tensors.push_back(d);
                 } else {
-                    valid_depth_tensors.push_back(torch::full({PROCESS_H, PROCESS_W, 1}, 10000.0f, torch::TensorOptions().dtype(torch::kFloat32).device(masks.device())));
+                    valid_depth_tensors.push_back(torch::zeros({PROCESS_H, PROCESS_W, 1}, torch::TensorOptions().dtype(torch::kFloat32).device(masks.device())));
                 }
             }
         }
 
         auto stacked_depths = torch::stack(valid_depth_tensors).contiguous();
 
-        // --- THE ABSOLUTE TRUTH FIX ---
         auto proj_full = impl->view_projection_tensor.index({valid});
-        
-        // 1. Force Transpose (OpenCV to OpenGL alignment)
         proj_full = proj_full.transpose(-1, -2).contiguous();
 
-        // 2. Meters to Millimeters
-        auto scale_mtx = torch::eye(4, proj_full.options());
-        scale_mtx[0][0] = 0.001f; scale_mtx[1][1] = 0.001f; scale_mtx[2][2] = 0.001f;
-        proj_full = torch::matmul(proj_full, scale_mtx);
+        glm::vec3 lower_corner = glm::vec3(-2.0f, 0.0f, -2.0f); 
+        float scale = 4.0f; 
 
-        // 3. Absolute Massive Search Volume
-        glm::vec3 lower_corner = glm::vec3(-10000.0f, -10000.0f, -10000.0f);
-        float scale = 20000.0f; // 20 meter search box
+        // --- PRE-FLIGHT INSPECTION BLOCK ---
+        std::cout << "\n[INSPECTION] Validating Inputs for frame: " << frame << std::endl;
+        std::cout << "[INSPECTION] Masks Shape: " << masks.sizes() << " | Max: " << masks.max().item<float>() << std::endl;
+        std::cout << "[INSPECTION] Depth Shape: " << stacked_depths.sizes() << " | Max: " << stacked_depths.max().item<float>() << std::endl;
+        
+        // Matrix sanity check - looking for NaNs or Inf
+        if (torch::any(torch::isnan(proj_full)).item<bool>()) std::cerr << "[ERROR] NaNs found in projection matrices!" << std::endl;
+        
+        // Test projecting the origin point
+        auto origin = torch::tensor({0.0f, 0.0f, 0.0f, 1.0f}, proj_full.options());
+        auto projected = torch::matmul(proj_full[0], origin);
+        std::cout << "[INSPECTION] Origin (0,0,0) projects to: " << projected.cpu() << std::endl;
+        std::cout << "[INSPECTION] --------------------------------------\n" << std::endl;
 
         auto [vertices, faces] = torchhull::visual_hull(masks, 
                                                         stacked_depths, 
                                                         proj_full,
                                                         impl->dataloader->level(),
                                                         {lower_corner.x, lower_corner.y, lower_corner.z},
-                                                        scale * 2.0f,
+                                                        scale,
                                                         impl->dataloader->partial_masks(),
                                                         "opengl",
                                                         true);
@@ -322,9 +321,7 @@ GeometryModule::compute_geometry(const glm::mat4& model,
         return reconstruction;
 
     } catch (const c10::OutOfMemoryError& e) {
-        std::cerr << "\n============================================================" << std::endl;
-        std::cerr << "[CRITICAL] CUDA Out Of Memory!" << std::endl;
-        std::cerr << "============================================================\n" << std::endl;
+        std::cerr << "\n[CRITICAL] CUDA Out Of Memory!" << std::endl;
         throw e;
     }
 }
