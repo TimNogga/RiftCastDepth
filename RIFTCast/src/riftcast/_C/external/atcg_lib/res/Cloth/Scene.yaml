@@ -1,0 +1,53 @@
+Scene: Untitled
+Entities:
+  - Entity: 1367856907436491458
+    Name: Camera
+    Transform:
+      Translation: [-3.48109126e-07, 13.6074047, -35.1386566]
+      Scale: [1, 1, 1]
+      EulerAngles: [3.1415925, -8.74227766e-08, -3.1415925]
+    PerspectiveCamera:
+      AspectRatio: 1.984375
+  - Entity: 16047274553353116323
+    Name: EditorCamera
+    EditorCamera:
+      Translation: [-42.2427559, 50.4284515, -38.6487045]
+      LookAt: [-0.171499982, 0.140301913, 0]
+      AspectRatio: 1.48467648
+  - Entity: 9381050064580013816
+    Name: Plane
+    Transform:
+      Translation: [0, 0, 0]
+      Scale: [100, 100, 100]
+      EulerAngles: [-0, 0, -0]
+    Geometry:
+      Type: 1
+      Vertices: res/Cloth/Scene.yaml.9381050064580013816.vertices
+      Faces: res/Cloth/Scene.yaml.9381050064580013816.faces
+      Edges: res/Cloth/Scene.yaml.9381050064580013816.edges
+    Renderer:
+      - RenderType: 0
+        Color: [1, 1, 1]
+        VertexShaderPath: exercises/Cloth/checkerboard.vs
+        FragmentShaderPath: exercises/Cloth/checkerboard.fs
+        GeometryShaderPath: ""
+  - Entity: 4564263465988320704
+    Name: Cloth
+    Transform:
+      Translation: [0, 14.6438665, 7.3710041]
+      Scale: [1, 1, 1]
+      EulerAngles: [1.13554299, 0, 0]
+    Geometry:
+      Type: 2
+      Vertices: res/Cloth/Scene.yaml.4564263465988320704.vertices
+      Edges: res/Cloth/Scene.yaml.4564263465988320704.edges
+    Renderer:
+      - RenderType: 2
+        Color: [1, 1, 1]
+        PointSize: 0.300000012
+        VertexShaderPath: shader/base.vs
+        FragmentShaderPath: shader/base.fs
+        GeometryShaderPath: ""
+      - RenderType: 4
+        Color: [1, 1, 1]
+        EdgeRadius: 1

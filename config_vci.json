@@ -1,0 +1,60 @@
+{
+    "type": "VCI_REAL",
+    "version": "2.1",
+    "dataset": {
+        "frame_count": 251,
+        "start_frame": 0,
+        "path": "/home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test",
+        "camera_path": "calibration.json",
+        "flip_images": true,
+        "flip_masks": false,
+        "to_world": [
+            -4.37114e-08,
+            -0.987688,
+            0.156434,
+            1.23449,
+            1,
+            -4.31732e-08,
+            6.83797e-09,
+            5.39612e-08,
+            0,
+            0.156434,
+            0.987688,
+            -2.62544,
+            -0,
+            0,
+            -0,
+            1
+        ]
+    },
+    "depth": {
+        "has_depth": true,
+        "scale": 85.0,
+        "extension": ".png"
+    },
+    "reconstructor": {
+        "gpu": 0,
+        "floor_offset": 0,
+        "level": 8,
+        "partial_masks": true
+    },
+    "renderer": {
+        "gpu": 0
+    },
+    "inpainting": {
+        "enable": false,
+        "path": "/home/zingsheim/Documents/Repositories/RIFTCast/inpainting"
+    },
+    "volume": {
+        "position": [
+            0,
+            1.5,
+            0
+        ],
+        "scale": 1.7
+    },
+    "server": {
+        "ip": "127.0.0.1",
+        "port": 25565
+    }
+}

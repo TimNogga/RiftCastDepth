@@ -1,0 +1,12 @@
+/build/*
+/build_linux/*
+/build_python/*
+/bin/*
+imgui.ini
+.vscode/*
+__pycache__
+*.egg-info
+typings
+
+docs/processed_README.md
+docs/_static/LICENSE

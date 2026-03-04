@@ -1,0 +1,206 @@
+[project]
+name = "charonload"
+version = "0.1.4"
+authors = [{ name = "Patrick Stotko", email = "stotko@cs.uni-bonn.de" }]
+description = "Develop C++/CUDA extensions with PyTorch like Python scripts"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "cmake>=3.27",
+    'ninja ; platform_system != "Windows"',
+    "filelock",
+    "torch",
+    "numpy",                                       # Required internally in torch
+    "colorama>=0.4.6",
+    "pybind11-stubgen>=2.3",
+    'tomli ; python_version < "3.11"',
+    'typing-extensions ; python_version < "3.11"',
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+]
+
+
+[project.urls]
+Homepage = "https://github.com/vc-bonn/charonload"
+Repository = "https://github.com/vc-bonn/charonload"
+Documentation = "https://vc-bonn.github.io/charonload/"
+Changelog = "https://github.com/vc-bonn/charonload/blob/main/CHANGELOG.md"
+
+
+[project.optional-dependencies]
+dev = [
+    # Packaging
+    "build",
+
+    # Formatting
+    "black~=24.0",
+    "isort",
+    "docformatter",
+    "clang-format~=14.0",
+
+    # Linting
+    "ruff>=0.6",
+    "mypy",
+    "codespell",
+    "check-manifest",
+
+    # Documentation
+    "sphinx",
+    "furo",
+    "sphinx-autobuild",
+    "sphinx-autodoc-typehints>=2.0",
+    "sphinx_autodoc_defaultargs",
+    "sphinx_copybutton",
+    "sphinx_design",
+    "sphinxcontrib-moderncmakedomain",
+    "myst-parser",
+    "docutils>=0.17",
+
+    # Tests
+    "pytest",
+    "pytest-datadir",
+    "pytest-cov",
+    "pytest-mock",
+
+    # Other
+    "nox",
+]
+
+
+[build-system]
+requires = ["setuptools>=64.0"]
+build-backend = "setuptools.build_meta"
+
+
+[tool.black]
+line-length = 120
+
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+py_version = 39
+
+
+[tool.docformatter]
+wrap-summaries = 120
+wrap-descriptions = 120
+pre-summary-newline = true
+tab-width = 4
+black = true
+syntax = "numpy"
+
+
+[tool.ruff]
+line-length = 120
+output-format = "full"
+
+
+[tool.ruff.lint]
+preview = false
+select = ["ALL"]
+ignore = [
+    # General rules
+    "C90", # mccabe
+    # Specific rules
+    "COM812",  # trailing-comma-missing
+    "PLR0912", # too-many-branches
+    "PLR0913", # too-many-args
+    "PLR0915", # too-many-statements
+]
+typing-modules = ["charonload._compat.typing"]
+
+
+[tool.ruff.lint.per-file-ignores]
+"src/charonload/__init__.py" = [
+    "E402", # module-import-not-at-top-of-file
+    "D",    # pydocstyle
+]
+"src/charonload/_runner.py" = [
+    "S603", # subprocess-without-shell-equals-true
+]
+"src/charonload/pybind11_stubgen/*" = [
+    "D", # pydocstyle
+]
+"tests/*" = [
+    "D",     # pydocstyle
+    "S101",  # assert-used
+    "INP",   # flake8-no-pep420
+    "PT011", # raises-too-broad
+]
+"docs/conf.py" = [
+    "D100", # undocumented-public-module
+    "INP",  # flake8-no-pep420
+    "ERA",  # eradicate
+]
+"tools/*.py" = [
+    "D",   # pydocstyle
+    "INP", # flake8-no-pep420
+]
+"tools/create_cmake_version_file.py" = [
+    "S603", # subprocess-without-shell-equals-true
+]
+"tools/process_changelog.py" = [
+    "S310", # suspicious-url-open-usage
+]
+"noxfile.py" = [
+    "D100", # undocumented-public-module
+]
+
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
+
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = ["-ra", "--showlocals", "--strict-markers", "--strict-config"]
+xfail_strict = true
+filterwarnings = ["error"]
+log_cli_level = "info"
+testpaths = ["tests"]
+
+
+[tool.coverage.run]
+branch = true
+omit = ["*/_compat/*"]
+
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+
+
+[tool.mypy]
+strict = true
+plugins = ["numpy.typing.mypy_plugin"]
+enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
+warn_return_any = true
+warn_unused_configs = true
+warn_unreachable = true
+pretty = true
+ignore_missing_imports = true                                                # This could be made local for the tests
+
+
+[tool.check-manifest]
+ignore = [
+    ".vscode/**/*",
+    "docs/**/*",
+    "tests/**/*",
+    "tools/**/*",
+    ".clang-format",
+    "CHANGELOG.md",
+    "noxfile.py",
+]
