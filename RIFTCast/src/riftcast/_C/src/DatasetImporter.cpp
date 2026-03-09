@@ -192,7 +192,7 @@ std::vector<std::vector<uint8_t>> VCIDatasetImporter::getImages(const uint32_t f
         std::string cam_name = _cameras[i].name;
         std::stringstream frame;
         frame << "frame_" << std::setfill('0') << std::setw(5) << frame_idx;
-        std::string path = _root_path + "/" + frame.str() + "/rgb/" + cam_name + ".png";
+        std::string path = _root_path + "/" + frame.str() + "/rgb/" + cam_name + ".jpg";
         std::ifstream input(path, std::ios::in | std::ios::binary | std::ios::ate);
         if(!input.is_open()) continue;
         std::streamsize file_size = input.tellg();

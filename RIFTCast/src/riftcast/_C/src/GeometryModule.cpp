@@ -246,25 +246,42 @@ GeometryModule::compute_geometry(const glm::mat4& model,
 
         auto stacked_depths = torch::stack(valid_depth_tensors).contiguous();
 
-        auto proj_full = impl->view_projection_tensor.index({valid});
-        proj_full = proj_full.transpose(-1, -2).contiguous();
+        auto proj_full = impl->view_projection_tensor.index({valid}).contiguous();
 
-        glm::vec3 lower_corner = glm::vec3(-2.0f, 0.0f, -2.0f); 
-        float scale = 4.0f; 
+        // Derive visual hull volume from the model matrix (volume position + scale)
+        // model = translate(volume_position) * scale(volume_scale)
+        // So model[3] = translation = volume center, and model[0][0] = uniform scale
+        glm::vec3 vol_center = glm::vec3(model[3]);
+        float vol_scale = model[0][0];  // uniform scale
+        glm::vec3 lower_corner = vol_center - glm::vec3(vol_scale);
+        float scale = vol_scale * 2.0f;
 
         // --- PRE-FLIGHT INSPECTION BLOCK ---
         std::cout << "\n[INSPECTION] Validating Inputs for frame: " << frame << std::endl;
+        std::cout << "[INSPECTION] VH volume: lower_corner=(" << lower_corner.x << ", " << lower_corner.y << ", " << lower_corner.z << "), scale=" << scale << std::endl;
+        std::cout << "[INSPECTION] VH volume: upper_corner=(" << lower_corner.x + scale << ", " << lower_corner.y + scale << ", " << lower_corner.z + scale << ")" << std::endl;
         std::cout << "[INSPECTION] Masks Shape: " << masks.sizes() << " | Max: " << masks.max().item<float>() << std::endl;
         std::cout << "[INSPECTION] Depth Shape: " << stacked_depths.sizes() << " | Max: " << stacked_depths.max().item<float>() << std::endl;
+        std::cout << "[INSPECTION] proj_full shape: " << proj_full.sizes() << std::endl;
         
         // Matrix sanity check - looking for NaNs or Inf
         if (torch::any(torch::isnan(proj_full)).item<bool>()) std::cerr << "[ERROR] NaNs found in projection matrices!" << std::endl;
         
-        // Test projecting the origin point
-        auto origin = torch::tensor({0.0f, 0.0f, 0.0f, 1.0f}, proj_full.options());
-        auto projected = torch::matmul(proj_full[0], origin);
-        std::cout << "[INSPECTION] Origin (0,0,0) projects to: " << projected.cpu() << std::endl;
-        std::cout << "[INSPECTION] --------------------------------------\n" << std::endl;
+        // Build valid-camera name list (maps filtered index -> camera name)
+        std::vector<std::string> valid_cam_names;
+        for (int i = 0; i < (int)host_valid.size(0); ++i) {
+            if (host_valid[i].item<bool>()) {
+                valid_cam_names.push_back(impl->cameras[i].name);
+            }
+        }
+
+        int H = masks.size(1), W = masks.size(2);
+
+        std::cout << "[INSPECTION] Using " << proj_full.size(0) << " cameras for visual hull" << std::endl;
+
+        std::cout << "[INSPECTION] Volume: (" << lower_corner.x << "," << lower_corner.y << "," << lower_corner.z 
+                  << ") to (" << lower_corner.x+scale << "," << lower_corner.y+scale << "," << lower_corner.z+scale << ")" << std::endl;
+        std::cout << "[INSPECTION] level=" << impl->dataloader->level() << " partial_masks=" << impl->dataloader->partial_masks() << std::endl;
 
         auto [vertices, faces] = torchhull::visual_hull(masks, 
                                                         stacked_depths, 
@@ -285,6 +302,8 @@ GeometryModule::compute_geometry(const glm::mat4& model,
             reconstruction.current_frame = impl->dataloader->getLastAvailableFrame();
             return reconstruction;
         }
+
+        std::cout << "[VH SUCCESS] vertices: " << vertices.sizes() << " faces: " << faces.sizes() << std::endl;
 
         torch::Tensor normals = torch::zeros_like(vertices);
         torch::Tensor visible_primitives_per_camera = torch::empty({0}, torch::kFloat32);

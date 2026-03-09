@@ -1,0 +1,356 @@
+libEGL warning: failed to open /dev/dri/card1: Permission denied
+
+libEGL warning: failed to open /dev/dri/card1: Permission denied
+
+libEGL warning: failed to open /dev/dri/card1: Permission denied
+
+The XKEYBOARD keymap compiler (xkbcomp) reports:
+> Warning:          Could not resolve keysym XF86CameraAccessEnable
+> Warning:          Could not resolve keysym XF86CameraAccessDisable
+> Warning:          Could not resolve keysym XF86CameraAccessToggle
+> Warning:          Could not resolve keysym XF86NextElement
+> Warning:          Could not resolve keysym XF86PreviousElement
+> Warning:          Could not resolve keysym XF86AutopilotEngageToggle
+> Warning:          Could not resolve keysym XF86MarkWaypoint
+> Warning:          Could not resolve keysym XF86Sos
+> Warning:          Could not resolve keysym XF86NavChart
+> Warning:          Could not resolve keysym XF86FishingChart
+> Warning:          Could not resolve keysym XF86SingleRangeRadar
+> Warning:          Could not resolve keysym XF86DualRangeRadar
+> Warning:          Could not resolve keysym XF86RadarOverlay
+> Warning:          Could not resolve keysym XF86TraditionalSonar
+> Warning:          Could not resolve keysym XF86ClearvuSonar
+> Warning:          Could not resolve keysym XF86SidevuSonar
+> Warning:          Could not resolve keysym XF86NavInfo
+Errors from xkbcomp are not fatal to the X server
+[15:50:38] ATCG(info): OpenGL Renderer:
+[15:50:38] ATCG(info):     Vendor: NVIDIA Corporation
+[15:50:38] ATCG(info):     Renderer: NVIDIA GeForce RTX 3090/PCIe/SSE2
+[15:50:38] ATCG(info):     Version: 4.6.0 NVIDIA 590.48.01
+[15:50:38] ATCG(info): ---------------------------------
+[15:50:38] ATCG(info): RendererSystem supports 192 texture units.
+[15:50:38] ATCG(info): Initialized Scripting engine
+[DEBUG] importCameras: Targeting 1080p
+[15:50:38] ATCG(info): OpenGL Renderer:
+[15:50:38] ATCG(info):     Vendor: NVIDIA Corporation
+[15:50:38] ATCG(info):     Renderer: NVIDIA GeForce RTX 3090/PCIe/SSE2
+[15:50:38] ATCG(info):     Version: 4.6.0 NVIDIA 590.48.01
+[15:50:38] ATCG(info): ---------------------------------
+[15:50:38] ATCG(info): RendererSystem supports 192 texture units.
+[15:50:38] ATCG(info): OpenGL Renderer:
+[15:50:38] ATCG(info):     Vendor: NVIDIA Corporation
+[15:50:38] ATCG(info):     Renderer: NVIDIA GeForce RTX 3090/PCIe/SSE2
+[15:50:38] ATCG(info):     Version: 4.6.0 NVIDIA 590.48.01
+[15:50:38] ATCG(info): ---------------------------------
+[15:50:38] ATCG(info): RendererSystem supports 192 texture units.
+[DEBUG] getDepths starting for frame: 0
+[DEBUG] Orbbec Depth (D003L) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.81671
+[DEBUG] Orbbec Depth (D005Z) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.75591
+[DEBUG] getMasks starting for frame: 0
+
+[INSPECTION] Validating Inputs for frame: 0
+[INSPECTION] Masks Shape: [36, 1080, 1920, 1] | Max: 1
+[INSPECTION] Depth Shape: [36, 1080, 1920, 1] | Max: 3
+[INSPECTION] Origin (0,0,0) projects to: -0.1238
+-0.1888
+ 0.9742
+ 0.6167
+[ CPUFloatType{4} ]
+[INSPECTION] --------------------------------------
+
+[WARNING] Visual hull returned empty mesh!
+[DEBUG] Reconstruction vertices count: 0
+[15:50:38] ATCG(warning): Reconstruction failed for frame 0, skipping...
+[DEBUG] getDepths starting for frame: 1
+[DEBUG] Orbbec Depth (D003L) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.83458
+[DEBUG] Orbbec Depth (D005Z) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.77646
+[DEBUG] getMasks starting for frame: 1
+
+[INSPECTION] Validating Inputs for frame: 1
+[INSPECTION] Masks Shape: [36, 1080, 1920, 1] | Max: 1
+[INSPECTION] Depth Shape: [36, 1080, 1920, 1] | Max: 3
+[INSPECTION] Origin (0,0,0) projects to: -0.1238
+-0.1888
+ 0.9742
+ 0.6167
+[ CPUFloatType{4} ]
+[INSPECTION] --------------------------------------
+
+[WARNING] Visual hull returned empty mesh!
+[DEBUG] Reconstruction vertices count: 0
+[15:50:38] ATCG(warning): Reconstruction failed for frame 1, skipping...
+[DEBUG] getDepths starting for frame: 2
+[DEBUG] Orbbec Depth (D003L) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.85113
+[DEBUG] Orbbec Depth (D005Z) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.80781
+[DEBUG] getMasks starting for frame: 2
+
+[INSPECTION] Validating Inputs for frame: 2
+[INSPECTION] Masks Shape: [36, 1080, 1920, 1] | Max: 1
+[INSPECTION] Depth Shape: [36, 1080, 1920, 1] | Max: 3
+[INSPECTION] Origin (0,0,0) projects to: -0.1238
+-0.1888
+ 0.9742
+ 0.6167
+[ CPUFloatType{4} ]
+[INSPECTION] --------------------------------------
+
+[WARNING] Visual hull returned empty mesh!
+[DEBUG] Reconstruction vertices count: 0
+[15:50:39] ATCG(warning): Reconstruction failed for frame 2, skipping...
+[DEBUG] getDepths starting for frame: 3
+[DEBUG] Orbbec Depth (D003L) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.86098
+[DEBUG] Orbbec Depth (D005Z) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.80291
+[DEBUG] getMasks starting for frame: 3
+
+[INSPECTION] Validating Inputs for frame: 3
+[INSPECTION] Masks Shape: [36, 1080, 1920, 1] | Max: 1
+[INSPECTION] Depth Shape: [36, 1080, 1920, 1] | Max: 3
+[INSPECTION] Origin (0,0,0) projects to: -0.1238
+-0.1888
+ 0.9742
+ 0.6167
+[ CPUFloatType{4} ]
+[INSPECTION] --------------------------------------
+
+[WARNING] Visual hull returned empty mesh!
+[DEBUG] Reconstruction vertices count: 0
+[15:50:39] ATCG(warning): Reconstruction failed for frame 3, skipping...
+[DEBUG] getDepths starting for frame: 4
+[DEBUG] Orbbec Depth (D003L) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.85233
+[DEBUG] Orbbec Depth (D005Z) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.79895
+[DEBUG] getMasks starting for frame: 4
+
+[INSPECTION] Validating Inputs for frame: 4
+[INSPECTION] Masks Shape: [36, 1080, 1920, 1] | Max: 1
+[INSPECTION] Depth Shape: [36, 1080, 1920, 1] | Max: 3
+[INSPECTION] Origin (0,0,0) projects to: -0.1238
+-0.1888
+ 0.9742
+ 0.6167
+[ CPUFloatType{4} ]
+[INSPECTION] --------------------------------------
+
+[WARNING] Visual hull returned empty mesh!
+[DEBUG] Reconstruction vertices count: 0
+[15:50:39] ATCG(warning): Reconstruction failed for frame 4, skipping...
+[DEBUG] getDepths starting for frame: 5
+[DEBUG] Orbbec Depth (D003L) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.84526
+[DEBUG] Orbbec Depth (D005Z) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.78643
+[DEBUG] getMasks starting for frame: 5
+
+[INSPECTION] Validating Inputs for frame: 5
+[INSPECTION] Masks Shape: [36, 1080, 1920, 1] | Max: 1
+[INSPECTION] Depth Shape: [36, 1080, 1920, 1] | Max: 3
+[INSPECTION] Origin (0,0,0) projects to: -0.1238
+-0.1888
+ 0.9742
+ 0.6167
+[ CPUFloatType{4} ]
+[INSPECTION] --------------------------------------
+
+[WARNING] Visual hull returned empty mesh!
+[DEBUG] Reconstruction vertices count: 0
+[15:50:39] ATCG(warning): Reconstruction failed for frame 5, skipping...
+[DEBUG] getDepths starting for frame: 6
+[DEBUG] Orbbec Depth (D003L) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.83088
+[DEBUG] Orbbec Depth (D005Z) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.77237
+[DEBUG] getMasks starting for frame: 6
+
+[INSPECTION] Validating Inputs for frame: 6
+[INSPECTION] Masks Shape: [36, 1080, 1920, 1] | Max: 1
+[INSPECTION] Depth Shape: [36, 1080, 1920, 1] | Max: 3
+[INSPECTION] Origin (0,0,0) projects to: -0.1238
+-0.1888
+ 0.9742
+ 0.6167
+[ CPUFloatType{4} ]
+[INSPECTION] --------------------------------------
+
+[WARNING] Visual hull returned empty mesh!
+[DEBUG] Reconstruction vertices count: 0
+[15:50:39] ATCG(warning): Reconstruction failed for frame 6, skipping...
+[DEBUG] getDepths starting for frame: 7
+[DEBUG] Orbbec Depth (D003L) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.79774
+[DEBUG] Orbbec Depth (D005Z) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.72505
+[DEBUG] getMasks starting for frame: 7
+
+[INSPECTION] Validating Inputs for frame: 7
+[INSPECTION] Masks Shape: [36, 1080, 1920, 1] | Max: 1
+[INSPECTION] Depth Shape: [36, 1080, 1920, 1] | Max: 3
+[INSPECTION] Origin (0,0,0) projects to: -0.1238
+-0.1888
+ 0.9742
+ 0.6167
+[ CPUFloatType{4} ]
+[INSPECTION] --------------------------------------
+
+[WARNING] Visual hull returned empty mesh!
+[DEBUG] Reconstruction vertices count: 0
+[15:50:39] ATCG(warning): Reconstruction failed for frame 7, skipping...
+[DEBUG] getDepths starting for frame: 8
+[DEBUG] Orbbec Depth (D003L) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.75436
+[DEBUG] Orbbec Depth (D005Z) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.67835
+[DEBUG] getMasks starting for frame: 8
+
+[INSPECTION] Validating Inputs for frame: 8
+[INSPECTION] Masks Shape: [36, 1080, 1920, 1] | Max: 1
+[INSPECTION] Depth Shape: [36, 1080, 1920, 1] | Max: 3
+[INSPECTION] Origin (0,0,0) projects to: -0.1238
+-0.1888
+ 0.9742
+ 0.6167
+[ CPUFloatType{4} ]
+[INSPECTION] --------------------------------------
+
+[WARNING] Visual hull returned empty mesh!
+[DEBUG] Reconstruction vertices count: 0
+[15:50:39] ATCG(warning): Reconstruction failed for frame 8, skipping...
+[DEBUG] getDepths starting for frame: 9
+[DEBUG] Orbbec Depth (D003L) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.82263
+[DEBUG] Orbbec Depth (D005Z) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.75559
+[DEBUG] getMasks starting for frame: 9
+
+[INSPECTION] Validating Inputs for frame: 9
+[INSPECTION] Masks Shape: [36, 1080, 1920, 1] | Max: 1
+[INSPECTION] Depth Shape: [36, 1080, 1920, 1] | Max: 3
+[INSPECTION] Origin (0,0,0) projects to: -0.1238
+-0.1888
+ 0.9742
+ 0.6167
+[ CPUFloatType{4} ]
+[INSPECTION] --------------------------------------
+
+[WARNING] Visual hull returned empty mesh!
+[DEBUG] Reconstruction vertices count: 0
+[15:50:39] ATCG(warning): Reconstruction failed for frame 9, skipping...
+[DEBUG] getDepths starting for frame: 10
+[DEBUG] Orbbec Depth (D003L) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.85771
+[DEBUG] Orbbec Depth (D005Z) Shape: [1080, 1920, 1] | Min: 0 | Max: 3 | Mean: 1.81304
+[DEBUG] getMasks starting for frame: 10
+
+[INSPECTION] Validating Inputs for frame: 10
+[INSPECTION] Masks Shape: [36, 1080, 1920, 1] | Max: 1
+[INSPECTION] Depth Shape: [36, 1080, 1920, 1] | Max: 3
+[INSPECTION] Origin (0,0,0) projects to: -0.1238
+-0.1888
+ 0.9742
+ 0.6167
+[ CPUFloatType{4} ]
+[INSPECTION] --------------------------------------
+
+[WARNING] Visual hull returned empty mesh!
+[DEBUG] Reconstruction vertices count: 0
+[15:50:39] ATCG(warning): Reconstruction failed for frame 10, skipping...
+[DEBUG] getDepths starting for frame: 11
+[ WARN:0@1.884] global loadsave.cpp:241 findDecoder imread_('/home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/D003L.png'): can't open/read file: check file path/integrity
+[DEBUG] Orbbec depth not found at: /home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/D003L.png
+[ WARN:0@1.884] global loadsave.cpp:241 findDecoder imread_('/home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/D005Z.png'): can't open/read file: check file path/integrity
+[DEBUG] Orbbec depth not found at: /home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/D005Z.png
+[DEBUG] getMasks starting for frame: 11
+[ WARN:0@1.885] global loadsave.cpp:241 findDecoder imread_('/home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/D003L.png'): can't open/read file: check file path/integrity
+[ WARN:0@1.885] global loadsave.cpp:241 findDecoder imread_('/home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/D005Z.png'): can't open/read file: check file path/integrity
+
+[INSPECTION] Validating Inputs for frame: 11
+[INSPECTION] Masks Shape: [36, 1080, 1920, 1] | Max: 1
+[INSPECTION] Depth Shape: [36, 1080, 1920, 1] | Max: 0
+[INSPECTION] Origin (0,0,0) projects to: -0.1238
+-0.1888
+ 0.9742
+ 0.6167
+[ CPUFloatType{4} ]
+[INSPECTION] --------------------------------------
+
+[DEBUG] Reconstruction vertices count: 204656
+[DEBUG] Getting primitive buffers...
+[DEBUG] Camera 0: Start processing Loop
+[DEBUG] Camera 0: Getting primitive buffer attachment...
+[DEBUG] Camera 0: Pushing primitive dump job...
+[DEBUG] Camera 0: Cloning visible primitives...
+[DEBUG] Camera 0: render_module->updateState...
+[DEBUG] getImages starting for frame: 11
+[ WARN:0@2.003] global loadsave.cpp:241 findDecoder imread_('/home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C0004.png'): can't open/read file: check file path/integrity
+[DEBUG] RGB file missing at /home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C0004.png
+[ WARN:0@2.003] global loadsave.cpp:241 findDecoder imread_('/home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C0007.png'): can't open/read file: check file path/integrity
+[DEBUG] RGB file missing at /home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C0007.png
+[ WARN:0@2.003] global loadsave.cpp:241 findDecoder imread_('/home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C0018.png'): can't open/read file: check file path/integrity
+[DEBUG] RGB file missing at /home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C0018.png
+[DEBUG] Camera 0: render_module->renderFrame...
+[DEBUG] Camera 0: Frame rendered.
+[DEBUG] Camera 0: Getting Attachments (0)...
+[DEBUG] Camera 0: Getting Attachments (2)...
+[DEBUG] Camera 0: Getting Attachments (3)...
+[DEBUG] Camera 0: Calculating Error/Mask...
+[DEBUG] Camera 0: Inpainting...
+[DEBUG] Camera 0: Inpainting done.
+[DEBUG] Camera 0: Indexing chosen cameras...
+[DEBUG] Camera 0: Cycle Complete.
+[DEBUG] Camera 1: Start processing Loop
+[DEBUG] Camera 1: Getting primitive buffer attachment...
+[DEBUG] Camera 1: Pushing primitive dump job...
+[DEBUG] Camera 1: Cloning visible primitives...
+[DEBUG] Camera 1: render_module->updateState...
+[DEBUG] getImages starting for frame: 11
+[ WARN:0@2.021] global loadsave.cpp:241 findDecoder imread_('/home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C0004.png'): can't open/read file: check file path/integrity
+[DEBUG] RGB file missing at /home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C0004.png
+[ WARN:0@2.021] global loadsave.cpp:241 findDecoder imread_('/home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C0028.png'): can't open/read file: check file path/integrity
+[DEBUG] RGB file missing at /home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C0028.png
+[ WARN:0@2.021] global loadsave.cpp:241 findDecoder imread_('/home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C1000.png'): can't open/read file: check file path/integrity
+[DEBUG] RGB file missing at /home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C1000.png
+[DEBUG] Camera 1: render_module->renderFrame...
+[DEBUG] Camera 1: Frame rendered.
+[DEBUG] Camera 1: Getting Attachments (0)...
+[DEBUG] Camera 1: Getting Attachments (2)...
+[DEBUG] Camera 1: Getting Attachments (3)...
+[DEBUG] Camera 1: Calculating Error/Mask...
+[DEBUG] Camera 1: Inpainting...
+[DEBUG] Camera 1: Inpainting done.
+[DEBUG] Camera 1: Indexing chosen cameras...
+[DEBUG] Camera 1: Cycle Complete.
+[DEBUG] Camera 2: Start processing Loop
+[DEBUG] Camera 2: Getting primitive buffer attachment...
+[DEBUG] Camera 2: Pushing primitive dump job...
+[DEBUG] Camera 2: Cloning visible primitives...
+[DEBUG] Camera 2: render_module->updateState...
+[DEBUG] getImages starting for frame: 11
+[ WARN:0@2.031] global loadsave.cpp:241 findDecoder imread_('/home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C0004.png'): can't open/read file: check file path/integrity
+[DEBUG] RGB file missing at /home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C0004.png
+[ WARN:0@2.031] global loadsave.cpp:241 findDecoder imread_('/home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C0007.png'): can't open/read file: check file path/integrity
+[DEBUG] RGB file missing at /home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C0007.png
+[ WARN:0@2.031] global loadsave.cpp:241 findDecoder imread_('/home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C0018.png'): can't open/read file: check file path/integrity
+[DEBUG] RGB file missing at /home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test/frame_00011/rgb/C0018.png
+[DEBUG] Camera 2: render_module->renderFrame...
+[DEBUG] Camera 2: Frame rendered.
+[DEBUG] Camera 2: Getting Attachments (0)...
+[DEBUG] Camera 2: Getting Attachments (2)...
+[DEBUG] Camera 2: Getting Attachments (3)...
+[DEBUG] Camera 2: Calculating Error/Mask...
+[DEBUG] Camera 2: Inpainting...
+[DEBUG] Camera 2: Inpainting done.
+[DEBUG] Camera 2: Indexing chosen cameras...
+[DEBUG] Camera 2: Cycle Complete.
+libEGL warning: failed to open /dev/dri/card1: Permission denied
+
+libEGL warning: failed to open /dev/dri/card1: Permission denied
+
+libEGL warning: failed to open /dev/dri/card1: Permission denied
+
+The XKEYBOARD keymap compiler (xkbcomp) reports:
+> Warning:          Could not resolve keysym XF86CameraAccessEnable
+> Warning:          Could not resolve keysym XF86CameraAccessDisable
+> Warning:          Could not resolve keysym XF86CameraAccessToggle
+> Warning:          Could not resolve keysym XF86NextElement
+> Warning:          Could not resolve keysym XF86PreviousElement
+> Warning:          Could not resolve keysym XF86AutopilotEngageToggle
+> Warning:          Could not resolve keysym XF86MarkWaypoint
+> Warning:          Could not resolve keysym XF86Sos
+> Warning:          Could not resolve keysym XF86NavChart
+> Warning:          Could not resolve keysym XF86FishingChart
+> Warning:          Could not resolve keysym XF86SingleRangeRadar
+> Warning:          Could not resolve keysym XF86DualRangeRadar
+> Warning:          Could not resolve keysym XF86RadarOverlay
+> Warning:          Could not resolve keysym XF86TraditionalSonar
+> Warning:          Could not resolve keysym XF86ClearvuSonar
+> Warning:          Could not resolve keysym XF86SidevuSonar
+> Warning:          Could not resolve keysym XF86NavInfo
+Errors from xkbcomp are not fatal to the X server
+Segmentation fault (core dumped)

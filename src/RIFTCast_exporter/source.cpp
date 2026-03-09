@@ -6,10 +6,14 @@
 #include <ATCG.h>
 
 #include <algorithm>
+#include <unordered_set>
 
 #include <random>
 
 #include <riftcast/DatasetImporter.h>
+
+#include <json.hpp>
+#include <fstream>
 
 #include <portable-file-dialogs.h>
 
@@ -256,6 +260,25 @@ public:
         atcg::Renderer::use();
 
         cam_valid = torch::ones({dataloader->num_cameras()}, atcg::TensorOptions::int32DeviceOptions());
+
+        // Disable D-cameras and cameras with known bad masks
+        {
+            const auto& all_cams = dataloader->getCameras();
+            // Cameras whose masks don't align with the volume center
+            const std::unordered_set<std::string> bad_cams = {"C0024", "C0030", "C1001"};
+            auto cam_valid_cpu = cam_valid.to(torch::kCPU);
+            int disabled = 0;
+            for (int i = 0; i < (int)all_cams.size(); ++i) {
+                if ((!all_cams[i].name.empty() && all_cams[i].name[0] == 'D') ||
+                    bad_cams.count(all_cams[i].name)) {
+                    cam_valid_cpu[i] = 0;
+                    disabled++;
+                }
+            }
+            cam_valid = cam_valid_cpu.to(cam_valid.device());
+            ATCG_INFO("Disabled {} cameras (D + bad masks), {} cameras remain active", disabled, (int)all_cams.size() - disabled);
+        }
+
         atcg::TransformComponent transform;
         transform.setScale(glm::vec3(header.volume_scale));
         transform.setPosition(header.volume_position);
@@ -275,6 +298,114 @@ public:
             test_cameras = dataloader_test->getCameras();
         }
 
+        // --- Debug JSON: dump camera intrinsics, extrinsics, and metadata ---
+        {
+            using json = nlohmann::json;
+
+            auto mat4_to_json = [](const glm::mat4& m) -> json
+            {
+                json arr = json::array();
+                for(int col = 0; col < 4; ++col)
+                    for(int row = 0; row < 4; ++row)
+                        arr.push_back(m[col][row]);
+                return arr;
+            };
+
+            auto mat3_to_json = [](const glm::mat3& m) -> json
+            {
+                json arr = json::array();
+                for(int col = 0; col < 3; ++col)
+                    for(int row = 0; row < 3; ++row)
+                        arr.push_back(m[col][row]);
+                return arr;
+            };
+
+            json cam_array = json::array();
+            for(const auto& cd : cameras)
+            {
+                const auto& intrinsics = cd.cam->getIntrinsics();
+                const auto& extrinsics = cd.cam->getExtrinsics();
+                glm::mat3 K = atcg::CameraUtils::convert_to_opencv(intrinsics, cd.width, cd.height);
+
+                json entry;
+                entry["id"]     = cd.id;
+                entry["name"]   = cd.name;
+                entry["width"]  = cd.width;
+                entry["height"] = cd.height;
+
+                entry["intrinsics"]["K_opencv"]        = mat3_to_json(K);
+                entry["intrinsics"]["projection_gl"]   = mat4_to_json(intrinsics.projection());
+                entry["intrinsics"]["fov_y_deg"]       = intrinsics.FOV();
+                entry["intrinsics"]["aspect_ratio"]    = intrinsics.aspectRatio();
+                entry["intrinsics"]["znear"]           = intrinsics.zNear();
+                entry["intrinsics"]["zfar"]            = intrinsics.zFar();
+                entry["intrinsics"]["optical_center"]  = {intrinsics.opticalCenter().x, intrinsics.opticalCenter().y};
+
+                entry["extrinsics"]["view_matrix_gl"]       = mat4_to_json(extrinsics.extrinsicMatrix());
+                entry["extrinsics"]["position"]             = {extrinsics.position().x, extrinsics.position().y, extrinsics.position().z};
+                entry["extrinsics"]["target"]               = {extrinsics.target().x, extrinsics.target().y, extrinsics.target().z};
+
+                entry["view_projection"] = mat4_to_json(cd.cam->getViewProjection());
+
+                cam_array.push_back(entry);
+            }
+
+            json test_cam_array = json::array();
+            for(const auto& cd : test_cameras)
+            {
+                const auto& intrinsics = cd.cam->getIntrinsics();
+                const auto& extrinsics = cd.cam->getExtrinsics();
+                glm::mat3 K = atcg::CameraUtils::convert_to_opencv(intrinsics, cd.width, cd.height);
+
+                json entry;
+                entry["id"]     = cd.id;
+                entry["name"]   = cd.name;
+                entry["width"]  = cd.width;
+                entry["height"] = cd.height;
+
+                entry["intrinsics"]["K_opencv"]        = mat3_to_json(K);
+                entry["intrinsics"]["projection_gl"]   = mat4_to_json(intrinsics.projection());
+                entry["intrinsics"]["fov_y_deg"]       = intrinsics.FOV();
+                entry["intrinsics"]["aspect_ratio"]    = intrinsics.aspectRatio();
+                entry["intrinsics"]["znear"]           = intrinsics.zNear();
+                entry["intrinsics"]["zfar"]            = intrinsics.zFar();
+                entry["intrinsics"]["optical_center"]  = {intrinsics.opticalCenter().x, intrinsics.opticalCenter().y};
+
+                entry["extrinsics"]["view_matrix_gl"]       = mat4_to_json(extrinsics.extrinsicMatrix());
+                entry["extrinsics"]["position"]             = {extrinsics.position().x, extrinsics.position().y, extrinsics.position().z};
+                entry["extrinsics"]["target"]               = {extrinsics.target().x, extrinsics.target().y, extrinsics.target().z};
+
+                entry["view_projection"] = mat4_to_json(cd.cam->getViewProjection());
+
+                test_cam_array.push_back(entry);
+            }
+
+            json debug;
+            debug["cameras"]      = cam_array;
+            debug["test_cameras"] = test_cam_array;
+            debug["model_matrix"] = mat4_to_json(model);
+            debug["to_world"]     = mat4_to_json(header.to_world);
+            debug["volume"]       = {{"position", {header.volume_position.x, header.volume_position.y, header.volume_position.z}},
+                                     {"scale", header.volume_scale}};
+            debug["depth"]        = {{"has_depth", header.has_depth},
+                                     {"scale", header.depth_scale},
+                                     {"extension", header.depth_extension}};
+            debug["num_cameras"]  = dataloader->num_cameras();
+            debug["num_frames"]   = dataloader->num_frames();
+            debug["start_frame"]  = dataloader->start_frame();
+            debug["resolution"]   = {{"width", dataloader->width()}, {"height", dataloader->height()}};
+
+            std::string debug_path = output_dir + "/camera_debug.json";
+            std::ofstream ofs(debug_path);
+            if(ofs.is_open())
+            {
+                ofs << debug.dump(2);
+                ofs.close();
+                ATCG_INFO("Wrote camera debug JSON to {}", debug_path);
+            }
+        }
+        // --- End debug JSON ---
+
         std::vector<float> rec_timings;
         std::vector<float> render_timings;
 
@@ -285,8 +416,9 @@ public:
             frame_folder << "frame_" << std::setfill('0') << std::setw(5) << frame_idx;
             std::string frame_folder_str = frame_folder.str();
 
-            // SENSORY FIX: Load real depth tensors here
-            std::vector<torch::Tensor> current_depths = dataloader->getDepths(frame_idx, cam_valid);
+            // DEBUG: Pass empty depths to disable depth carving
+            std::vector<torch::Tensor> current_depths(dataloader->num_cameras());
+            // std::vector<torch::Tensor> current_depths = dataloader->getDepths(frame_idx, cam_valid);
 
             if(!arguments.test_only)
             {
@@ -308,9 +440,12 @@ public:
                     });
 
                 auto primitive_buffers = geometry_module->getPrimitiveBuffers();
+                auto cam_valid_cpu = cam_valid.to(torch::kCPU);
 
                 for(int camera_idx = 0; camera_idx < dataloader->num_cameras(); ++camera_idx)
                 {
+                    if (cam_valid_cpu[camera_idx].item<int>() == 0) continue;
+
                     auto primitive_buffer = primitive_buffers[camera_idx]->getColorAttachement(0)->getData(atcg::GPU);
                     pool.pushJob(
                         [primitive_buffer, frame_folder_str, camera_idx, &cameras, output_dir]()
@@ -325,31 +460,41 @@ public:
                     {
                         reconstruction.visible_primitives.index_put_({(int)camera_idx, torch::indexing::Slice()}, 0);
                     }
+                    std::cerr << "[DEBUG] updateState cam " << camera_idx << " vis_prims=" << reconstruction.visible_primitives.sizes() << std::flush;
                     render_module->updateState(reconstruction,
                                                cameras[camera_idx].cam,
                                                cameras[camera_idx].width,
                                                cameras[camera_idx].height);
+                    std::cerr << " -> renderFrame" << std::flush;
                     auto frame = render_module->renderFrame(cameras[camera_idx].cam);
+                    std::cerr << " -> done" << std::endl;
 
+                    std::cerr << "[DEBUG] getColorAttachement..." << std::flush;
                     auto color      = frame->getColorAttachement(0)->getData(atcg::GPU);
                     auto visibility = frame->getColorAttachement(2)->getData(atcg::GPU);
                     auto depth      = frame->getColorAttachement(3)->getData(atcg::GPU);
+                    std::cerr << " ok" << std::endl;
 
+                    std::cerr << "[DEBUG] error/mask..." << std::flush;
                     auto error = torch::where(visibility == 0, uint8_t(255), uint8_t(0)).to(torch::kUInt8);
                     auto mask  = torch::where(visibility >= 0, uint8_t(255), uint8_t(0)).to(torch::kUInt8);
+                    std::cerr << " ok" << std::endl;
 
                     if(arguments.inpaint)
                     {
                         color = inpainting_module->inpaint(color, error.to(torch::kFloat32) / 255.);
                     }
 
+                    std::cerr << "[DEBUG] chosen_cams..." << std::flush;
                     auto chosen_cams =
                         torch::arange((int)dataloader->num_cameras(), atcg::TensorOptions::int32HostOptions())
                             .index({render_module->getChosenCameraIndices().to(atcg::CPU) == 1});
+                    std::cerr << " size=" << chosen_cams.sizes() << std::flush;
 
                     used_cameras[frame_idx][camera_idx][0] = chosen_cams[0];
                     used_cameras[frame_idx][camera_idx][1] = chosen_cams[1];
                     used_cameras[frame_idx][camera_idx][2] = chosen_cams[2];
+                    std::cerr << " ok" << std::endl;
 
                     reconstruction.visible_primitives = visible_copy;
 

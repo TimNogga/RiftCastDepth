@@ -278,8 +278,19 @@ void RenderModule::updateState(const GeometryReconstruction& reconstruction,
     }
 
     // 4. Load images
-    auto rgb_images = impl->dataloader->getImages(reconstruction.current_frame, impl->rgb_valid);
-    auto output     = impl->decoder->decompressImages(rgb_images);
+    auto rgb_images_all = impl->dataloader->getImages(reconstruction.current_frame, impl->rgb_valid);
+
+    // Filter to only valid cameras — decoder is sized for NUM_CAMERAS
+    std::vector<std::vector<uint8_t>> rgb_images;
+    {
+        torch::Tensor hv = impl->rgb_valid.to(torch::kCPU);
+        for(uint32_t i = 0; i < impl->dataloader->num_cameras(); ++i)
+        {
+            if(hv.index({(int)i}).item<int>() != 0)
+                rgb_images.push_back(std::move(rgb_images_all[i]));
+        }
+    }
+    auto output = impl->decoder->decompressImages(rgb_images);
 
     auto texture = impl->rgb_textures->getTextureArray();
     impl->decoder->copyToOutput(texture);
