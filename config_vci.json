@@ -5,9 +5,9 @@
         "frame_count": 251,
         "start_frame": 0,
         "path": "/home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test",
-        "camera_path": "calibration.json",
+        "camera_path": "calibration_dome.json",
         "flip_images": true,
-        "flip_masks": false,
+        "flip_masks": true,
         "to_world": [
             -4.37114e-08,
             -0.987688,

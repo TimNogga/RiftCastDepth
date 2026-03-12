@@ -31,3 +31,8 @@ _previews/2026_02_03_orbbec_test_001.mp4
 _previews/2026_02_03_orbbec_test_001.mp4
 *.dll
 _previews/
+2026_02_03_orbbec_test/frame_00001/
+bonn_tele_bench_001/
+config_vci_2.json
+export_depth_ON_old
+scripts/debug_masks.py

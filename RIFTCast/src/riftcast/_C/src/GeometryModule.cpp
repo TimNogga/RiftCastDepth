@@ -248,15 +248,11 @@ GeometryModule::compute_geometry(const glm::mat4& model,
 
         auto proj_full = impl->view_projection_tensor.index({valid}).contiguous();
 
-        // Derive visual hull volume from the model matrix (volume position + scale)
-        // model = translate(volume_position) * scale(volume_scale)
-        // So model[3] = translation = volume center, and model[0][0] = uniform scale
         glm::vec3 vol_center = glm::vec3(model[3]);
         float vol_scale = model[0][0];  // uniform scale
         glm::vec3 lower_corner = vol_center - glm::vec3(vol_scale);
         float scale = vol_scale * 2.0f;
 
-        // --- PRE-FLIGHT INSPECTION BLOCK ---
         std::cout << "\n[INSPECTION] Validating Inputs for frame: " << frame << std::endl;
         std::cout << "[INSPECTION] VH volume: lower_corner=(" << lower_corner.x << ", " << lower_corner.y << ", " << lower_corner.z << "), scale=" << scale << std::endl;
         std::cout << "[INSPECTION] VH volume: upper_corner=(" << lower_corner.x + scale << ", " << lower_corner.y + scale << ", " << lower_corner.z + scale << ")" << std::endl;
@@ -264,10 +260,8 @@ GeometryModule::compute_geometry(const glm::mat4& model,
         std::cout << "[INSPECTION] Depth Shape: " << stacked_depths.sizes() << " | Max: " << stacked_depths.max().item<float>() << std::endl;
         std::cout << "[INSPECTION] proj_full shape: " << proj_full.sizes() << std::endl;
         
-        // Matrix sanity check - looking for NaNs or Inf
         if (torch::any(torch::isnan(proj_full)).item<bool>()) std::cerr << "[ERROR] NaNs found in projection matrices!" << std::endl;
         
-        // Build valid-camera name list (maps filtered index -> camera name)
         std::vector<std::string> valid_cam_names;
         for (int i = 0; i < (int)host_valid.size(0); ++i) {
             if (host_valid[i].item<bool>()) {
@@ -276,6 +270,45 @@ GeometryModule::compute_geometry(const glm::mat4& model,
         }
 
         int H = masks.size(1), W = masks.size(2);
+
+        {
+            auto proj_cpu = proj_full.to(torch::kCPU).to(torch::kFloat32);
+            auto masks_cpu = masks.to(torch::kCPU).to(torch::kFloat32);
+            int n_valid = (int)proj_cpu.size(0);
+            std::cout << "\n[DIAG] === Per-camera mask diagnostic (volume center projection) ===" << std::endl;
+            std::cout << "[DIAG] Volume center: (" << vol_center.x << ", " << vol_center.y << ", " << vol_center.z << ")" << std::endl;
+            int carving_count = 0;
+            for (int ci = 0; ci < n_valid; ++ci) {
+                // Project volume center: clip = P * [x,y,z,1]
+                auto P = proj_cpu[ci]; // [4,4]
+                float x = vol_center.x, y = vol_center.y, z = vol_center.z;
+                float cx = P[0][0].item<float>()*x + P[0][1].item<float>()*y + P[0][2].item<float>()*z + P[0][3].item<float>();
+                float cy_val = P[1][0].item<float>()*x + P[1][1].item<float>()*y + P[1][2].item<float>()*z + P[1][3].item<float>();
+                float cz = P[2][0].item<float>()*x + P[2][1].item<float>()*y + P[2][2].item<float>()*z + P[2][3].item<float>();
+                float cw = P[3][0].item<float>()*x + P[3][1].item<float>()*y + P[3][2].item<float>()*z + P[3][3].item<float>();
+                // NDC
+                float ndc_x = cx / cw;
+                float ndc_y = cy_val / cw;
+                // NDC -> pixel (OpenGL: [-1,1] -> [0,W/H])
+                float px = (ndc_x + 1.0f) * 0.5f * W;
+                float py = (ndc_y + 1.0f) * 0.5f * H;
+                int ipx = (int)roundf(px);
+                int ipy = (int)roundf(py);
+                bool in_bounds = (ipx >= 0 && ipx < W && ipy >= 0 && ipy < H);
+                float mask_val = 0.0f;
+                if (in_bounds) mask_val = masks_cpu[ci][ipy][ipx][0].item<float>();
+                float mask_sum = masks_cpu[ci].sum().item<float>();
+                float mask_frac = mask_sum / (H * W);
+                std::string status = !in_bounds ? "OUT-OF-BOUNDS" : (mask_val > 0.5f ? "OK (foreground)" : "CARVING!");
+                if (in_bounds && mask_val <= 0.5f) carving_count++;
+                std::cout << "[DIAG]   cam[" << ci << "] " << valid_cam_names[ci]
+                          << "  pixel=(" << ipx << "," << ipy << ")"
+                          << "  mask@center=" << mask_val
+                          << "  mask_fill=" << (mask_frac*100.0f) << "%"
+                          << "  -> " << status << std::endl;
+            }
+            std::cout << "[DIAG] === " << carving_count << "/" << n_valid << " cameras CARVING at volume center ===\n" << std::endl;
+        }
 
         std::cout << "[INSPECTION] Using " << proj_full.size(0) << " cameras for visual hull" << std::endl;
 

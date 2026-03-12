@@ -264,7 +264,6 @@ public:
         // Disable D-cameras and cameras with known bad masks
         {
             const auto& all_cams = dataloader->getCameras();
-            // Cameras whose masks don't align with the volume center
             const std::unordered_set<std::string> bad_cams = {"C0024", "C0030", "C1001"};
             auto cam_valid_cpu = cam_valid.to(torch::kCPU);
             int disabled = 0;

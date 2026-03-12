@@ -161,13 +161,26 @@ std::vector<torch::Tensor> VCIDatasetImporter::getMasks(const uint32_t frame_idx
             native_mask = data.reshape({5328, 4608, 1});
         } else if (size == 1080 * 1920) {
             native_mask = data.reshape({1080, 1920, 1});
-        } else if (size == 1920 * 1080) {
+        } else if (size == 1920 * 1080) { // this can never happen because 1080*1920 is same as 1920*1080
             native_mask = data.reshape({1920, 1080, 1});
         } else {
             continue;
         }
 
+            ATCG_WARN("Flip masks: {}", _header.flip_masks);
+       
+        if (_header.flip_masks) {
+            ATCG_WARN("Flipping mask for camera {} at frame {}. If this is unexpected, check the dataset header settings.", _cameras[i].name, frame_idx);
+            native_mask = native_mask.flip(0);
+        }
+
         native_mask = native_mask.permute({2, 0, 1}).unsqueeze(0).to(torch::kCUDA).to(torch::kFloat32).div(255.0f);
+
+        if(native_mask.sum().item<float>() < 1.0f)
+        {
+            ATCG_WARN("Camera {} mask is empty at frame {}, skipping", _cameras[i].name, frame_idx);
+            continue;
+        }
 
         auto standardized_mask = torch::nn::functional::interpolate(native_mask, 
             torch::nn::functional::InterpolateFuncOptions()
