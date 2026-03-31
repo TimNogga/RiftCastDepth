@@ -5,6 +5,7 @@
 #include <iomanip>
 #include <fstream>
 #include <filesystem>
+#include <iterator>
 #include <torch/torch.h>
 
 using json = nlohmann::json;
@@ -142,6 +143,14 @@ std::vector<torch::Tensor> VCIDatasetImporter::getMasks(const uint32_t frame_idx
         if(valid_a[i] == 0) continue;
 
         std::string cam_name = _cameras[i].name;
+        const bool is_depth_camera = !cam_name.empty() && cam_name[0] == 'D';
+        
+        if(is_depth_camera)
+        {
+            masks[i] = torch::ones({PROCESS_H, PROCESS_W, 1}, torch::kCUDA);
+            continue; 
+        }
+
         std::stringstream frame_ss;
         frame_ss << "frame_" << std::setfill('0') << std::setw(5) << frame_idx;
         
@@ -161,16 +170,13 @@ std::vector<torch::Tensor> VCIDatasetImporter::getMasks(const uint32_t frame_idx
             native_mask = data.reshape({5328, 4608, 1});
         } else if (size == 1080 * 1920) {
             native_mask = data.reshape({1080, 1920, 1});
-        } else if (size == 1920 * 1080) { // this can never happen because 1080*1920 is same as 1920*1080
+        } else if (size == 1920 * 1080) {
             native_mask = data.reshape({1920, 1080, 1});
         } else {
             continue;
         }
-
-            ATCG_WARN("Flip masks: {}", _header.flip_masks);
        
         if (_header.flip_masks) {
-            ATCG_WARN("Flipping mask for camera {} at frame {}. If this is unexpected, check the dataset header settings.", _cameras[i].name, frame_idx);
             native_mask = native_mask.flip(0);
         }
 
@@ -231,36 +237,196 @@ std::vector<torch::Tensor> VCIDatasetImporter::getDepths(const uint32_t frame_id
         if(valid_a[i] == 0) continue;
 
         std::string cam_name = _cameras[i].name; 
+        const bool is_depth_camera = !cam_name.empty() && cam_name[0] == 'D';
+        if(!is_depth_camera)
+        {
+            depth_tensors[i] = torch::zeros({1, 1, 1}, torch::kCUDA);
+            continue;
+        }
+
         std::stringstream frame_ss;
         frame_ss << "frame_" << std::setfill('0') << std::setw(5) << frame_idx;
         
-        std::string path = _root_path + "/" + frame_ss.str() + "/rgb/" + cam_name + _header.depth_extension;
+        std::string pth_path_rgb = _root_path + "/" + frame_ss.str() + "/rgb/" + cam_name + ".pth";
+        std::string pth_path_depth = _root_path + "/" + frame_ss.str() + "/depth/" + cam_name + ".pth";
+        std::string pth_path = std::filesystem::exists(pth_path_rgb) ? pth_path_rgb : pth_path_depth;
+        if(std::filesystem::exists(pth_path))
+        {
+            torch::Tensor pth_tensor;
+            try
+            {
+                torch::load(pth_tensor, pth_path);
+            }
+            catch(const c10::Error& e)
+            {
+                try
+                {
+                    std::ifstream in(pth_path, std::ios::binary);
+                    std::vector<char> bytes((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+                    c10::IValue iv = torch::pickle_load(bytes);
+                    if(iv.isTensor())
+                    {
+                        pth_tensor = iv.toTensor();
+                    }
+                    else if(iv.isGenericDict())
+                    {
+                        for(const auto& kv : iv.toGenericDict())
+                        {
+                            if(kv.value().isTensor())
+                            {
+                                pth_tensor = kv.value().toTensor();
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch(const c10::Error& e2)
+                {
+                    ATCG_WARN("Failed to load depth tensor from {}: {}; pickle fallback failed: {}", pth_path, e.what(), e2.what());
+                }
+            }
+
+            if(pth_tensor.defined() && pth_tensor.numel() > 0)
+            {
+                auto t = pth_tensor.detach().to(torch::kCPU).contiguous();
+
+                if(t.dim() == 3 && t.size(0) == 3)
+                {
+                    t = t.index({0, torch::indexing::Slice(), torch::indexing::Slice()});
+                }
+
+                while(t.dim() > 2)
+                {
+                    if(t.size(0) == 1) t = t.squeeze(0);
+                    else if(t.size(t.dim() - 1) == 1) t = t.squeeze(-1);
+                    else break;
+                }
+
+                if(t.dim() == 1)
+                {
+                    const int64_t numel = t.numel();
+                    const int64_t cam_h = static_cast<int64_t>(_cameras[i].height);
+                    const int64_t cam_w = static_cast<int64_t>(_cameras[i].width);
+
+                    if(cam_h > 0 && cam_w > 0 && numel == cam_h * cam_w)
+                    {
+                        t = t.view({cam_h, cam_w});
+                    }
+                    else if(cam_h > 0 && cam_w > 0 && numel == cam_h * cam_w * 3)
+                    {
+                        // --- CRITICAL FIX: MATCH PYTHON CHW LAYOUT ---
+                        t = t.view({3, cam_h, cam_w}).index({0, torch::indexing::Slice(), torch::indexing::Slice()});
+                    }
+                    else if(numel % 3 == 0)
+                    {
+                        const int64_t gray_numel = numel / 3;
+                        const int64_t guessed_h = 1080;
+                        if(gray_numel % guessed_h == 0)
+                        {
+                            const int64_t guessed_w = gray_numel / guessed_h;
+                            // --- CRITICAL FIX: MATCH PYTHON CHW LAYOUT ---
+                            t = t.view({3, guessed_h, guessed_w}).index({0, torch::indexing::Slice(), torch::indexing::Slice()});
+                        }
+                    }
+                }
+
+                if(t.dim() != 2)
+                {
+                    ATCG_WARN("Unsupported depth tensor shape in {}: {}", pth_path, t.sizes());
+                    depth_tensors[i] = torch::zeros({1, 1, 1}, torch::kCUDA);
+                    continue;
+                }
+
+                static bool pth_depth_logged = false;
+                if(!pth_depth_logged)
+                {
+                    ATCG_INFO("Using .pth depth tensors (example: {}, dtype={}, shape={})",
+                              pth_path,
+                              t.dtype(),
+                              t.sizes());
+                    pth_depth_logged = true;
+                }
+
+                if(_header.flip_images)
+                {
+                    t = t.flip({0}).contiguous();
+                }
+
+                total_size += t.numel() * t.element_size();
+
+                torch::Tensor depth_tensor;
+                if(t.is_floating_point())
+                {
+                    depth_tensor = t.to(torch::kCUDA).to(torch::kFloat32).mul(4.0f).unsqueeze(-1);
+                }
+                else
+                {
+                    depth_tensor = t.to(torch::kCUDA).to(torch::kFloat32).div(_header.depth_scale).unsqueeze(-1);
+                }
+
+                depth_tensors[i] = depth_tensor;
+                continue;
+            }
+        }
+
+        std::string path = _root_path + "/" + frame_ss.str() + "/depth/" + cam_name + _header.depth_extension;
         cv::Mat depth_map = cv::imread(path, cv::IMREAD_UNCHANGED);
         
         if(depth_map.empty()) {
-             path = _root_path + "/" + frame_ss.str() + "/depth/" + cam_name + _header.depth_extension;
+             path = _root_path + "/" + frame_ss.str() + "/rgb/" + cam_name + _header.depth_extension;
              depth_map = cv::imread(path, cv::IMREAD_UNCHANGED);
              if(depth_map.empty()) {
-                 // Essential for alignment: return an empty 1x1 placeholder
                  depth_tensors[i] = torch::zeros({1, 1, 1}, torch::kCUDA);
                  continue;
              }
         }
 
+        if(_header.flip_images)
+        {
+            cv::flip(depth_map, depth_map, 0);
+        }
+
         total_size += depth_map.total() * depth_map.elemSize();
 
         if(depth_map.channels() > 1) cv::extractChannel(depth_map, depth_map, 0);
-        if(depth_map.depth() != CV_16U) depth_map.convertTo(depth_map, CV_16U);
 
-        torch::Tensor cpu_tensor = torch::empty({depth_map.rows, depth_map.cols, 1}, torch::kInt16);
+        const bool is_8bit = depth_map.depth() == CV_8U;
+        if(!is_8bit && depth_map.depth() != CV_16U) depth_map.convertTo(depth_map, CV_16U);
 
-        for (int r = 0; r < depth_map.rows; ++r) {
-            std::memcpy(cpu_tensor.data_ptr<int16_t>() + r * depth_map.cols, 
-                        depth_map.ptr<uint16_t>(r), 
-                        depth_map.cols * sizeof(uint16_t));
+        torch::Tensor cpu_tensor;
+        if(is_8bit)
+        {
+            cpu_tensor = torch::empty({depth_map.rows, depth_map.cols, 1}, torch::kUInt8);
+            for(int r = 0; r < depth_map.rows; ++r)
+            {
+                std::memcpy(cpu_tensor.data_ptr<uint8_t>() + r * depth_map.cols,
+                            depth_map.ptr<uint8_t>(r),
+                            depth_map.cols * sizeof(uint8_t));
+            }
+        }
+        else
+        {
+            cpu_tensor = torch::empty({depth_map.rows, depth_map.cols, 1}, torch::kInt16);
+            for(int r = 0; r < depth_map.rows; ++r)
+            {
+                std::memcpy(cpu_tensor.data_ptr<int16_t>() + r * depth_map.cols,
+                            depth_map.ptr<uint16_t>(r),
+                            depth_map.cols * sizeof(uint16_t));
+            }
         }
 
-        depth_tensors[i] = cpu_tensor.to(torch::kCUDA).to(torch::kFloat32).div(_header.depth_scale);
+        float depth_divisor = _header.depth_scale;
+        if(is_8bit)
+        {
+            depth_divisor = 255.0f / 3.0f;
+        }
+
+        auto depth_tensor = cpu_tensor.to(torch::kCUDA).to(torch::kFloat32).div(depth_divisor);
+        if(is_8bit)
+        {
+            depth_tensor = depth_tensor.clamp(0.0f, 3.0f);
+        }
+        depth_tensors[i] = depth_tensor;
     }
 
     _depth_logger.logSample(total_size); 

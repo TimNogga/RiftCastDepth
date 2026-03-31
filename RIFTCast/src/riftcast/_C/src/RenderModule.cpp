@@ -182,7 +182,12 @@ torch::Tensor RenderModule::Impl::findBestCamerasViaDirection(const atcg::ref_pt
     torch::Tensor scores = torch::zeros({(int)cameras.size()}, atcg::TensorOptions::floatHostOptions());
     for(int i = 0; i < cameras.size(); ++i)
     {
-        scores[i] = glm::dot(cameras[i].cam->getDirection(), camera->getDirection());
+        // --- FIX: BAN DEPTH CAMERAS FROM RGB SELECTION ---
+        if (!cameras[i].name.empty() && cameras[i].name[0] == 'D') {
+            scores[i] = -9999.0f; 
+        } else {
+            scores[i] = glm::dot(cameras[i].cam->getDirection(), camera->getDirection());
+        }
     }
 
     auto best_indices = torch::argsort(scores, -1, true);
@@ -263,6 +268,16 @@ void RenderModule::updateState(const GeometryReconstruction& reconstruction,
 
         auto currently_visible = rift::computeVisiblePrimitives(handle, width, height, impl->visual_hull->n_faces());
 
+        // --- CRITICAL FIX: FORCE DEPTH CAMERAS TO BE INVISIBLE FOR TEXTURING ---
+        torch::Tensor host_vis = currently_visible.to(torch::kCPU);
+        const std::vector<rift::CameraData>& all_cams = impl->dataloader->getCameras();
+        for (int i = 0; i < all_cams.size(); ++i) {
+            if (!all_cams[i].name.empty() && all_cams[i].name[0] == 'D') {
+                host_vis[i] = 0.0f; // Ban from RGB selection
+            }
+        }
+        currently_visible = host_vis.to(currently_visible.device());
+        // -----------------------------------------------------------------------
 
         if(impl->use_greedy_selection)
         {

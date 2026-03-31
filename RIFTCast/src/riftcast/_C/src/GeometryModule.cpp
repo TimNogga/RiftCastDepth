@@ -228,9 +228,14 @@ GeometryModule::compute_geometry(const glm::mat4& model,
 
         auto host_valid = forced_cam_valid.to(torch::kCPU).to(torch::kBool);
         std::vector<torch::Tensor> valid_depth_tensors;
+        std::vector<std::string> valid_cam_names;
+        std::vector<int> valid_cam_indices;
         
         for (int i = 0; i < (int)forced_cam_valid.size(0); ++i) {
             if (host_valid[i].item<bool>()) {
+                valid_cam_names.push_back(impl->cameras[i].name);
+                valid_cam_indices.push_back(i);
+                
                 if (i < (int)depths.size() && depths[i].defined() && depths[i].numel() > 100) {
                     auto d = depths[i].to(masks.device(), torch::kFloat32);
                     if (d.dim() == 2) d = d.unsqueeze(0).unsqueeze(0); 
@@ -245,76 +250,12 @@ GeometryModule::compute_geometry(const glm::mat4& model,
         }
 
         auto stacked_depths = torch::stack(valid_depth_tensors).contiguous();
-
         auto proj_full = impl->view_projection_tensor.index({valid}).contiguous();
 
         glm::vec3 vol_center = glm::vec3(model[3]);
-        float vol_scale = model[0][0];  // uniform scale
+        float vol_scale = model[0][0];  
         glm::vec3 lower_corner = vol_center - glm::vec3(vol_scale);
         float scale = vol_scale * 2.0f;
-
-        std::cout << "\n[INSPECTION] Validating Inputs for frame: " << frame << std::endl;
-        std::cout << "[INSPECTION] VH volume: lower_corner=(" << lower_corner.x << ", " << lower_corner.y << ", " << lower_corner.z << "), scale=" << scale << std::endl;
-        std::cout << "[INSPECTION] VH volume: upper_corner=(" << lower_corner.x + scale << ", " << lower_corner.y + scale << ", " << lower_corner.z + scale << ")" << std::endl;
-        std::cout << "[INSPECTION] Masks Shape: " << masks.sizes() << " | Max: " << masks.max().item<float>() << std::endl;
-        std::cout << "[INSPECTION] Depth Shape: " << stacked_depths.sizes() << " | Max: " << stacked_depths.max().item<float>() << std::endl;
-        std::cout << "[INSPECTION] proj_full shape: " << proj_full.sizes() << std::endl;
-        
-        if (torch::any(torch::isnan(proj_full)).item<bool>()) std::cerr << "[ERROR] NaNs found in projection matrices!" << std::endl;
-        
-        std::vector<std::string> valid_cam_names;
-        for (int i = 0; i < (int)host_valid.size(0); ++i) {
-            if (host_valid[i].item<bool>()) {
-                valid_cam_names.push_back(impl->cameras[i].name);
-            }
-        }
-
-        int H = masks.size(1), W = masks.size(2);
-
-        {
-            auto proj_cpu = proj_full.to(torch::kCPU).to(torch::kFloat32);
-            auto masks_cpu = masks.to(torch::kCPU).to(torch::kFloat32);
-            int n_valid = (int)proj_cpu.size(0);
-            std::cout << "\n[DIAG] === Per-camera mask diagnostic (volume center projection) ===" << std::endl;
-            std::cout << "[DIAG] Volume center: (" << vol_center.x << ", " << vol_center.y << ", " << vol_center.z << ")" << std::endl;
-            int carving_count = 0;
-            for (int ci = 0; ci < n_valid; ++ci) {
-                // Project volume center: clip = P * [x,y,z,1]
-                auto P = proj_cpu[ci]; // [4,4]
-                float x = vol_center.x, y = vol_center.y, z = vol_center.z;
-                float cx = P[0][0].item<float>()*x + P[0][1].item<float>()*y + P[0][2].item<float>()*z + P[0][3].item<float>();
-                float cy_val = P[1][0].item<float>()*x + P[1][1].item<float>()*y + P[1][2].item<float>()*z + P[1][3].item<float>();
-                float cz = P[2][0].item<float>()*x + P[2][1].item<float>()*y + P[2][2].item<float>()*z + P[2][3].item<float>();
-                float cw = P[3][0].item<float>()*x + P[3][1].item<float>()*y + P[3][2].item<float>()*z + P[3][3].item<float>();
-                // NDC
-                float ndc_x = cx / cw;
-                float ndc_y = cy_val / cw;
-                // NDC -> pixel (OpenGL: [-1,1] -> [0,W/H])
-                float px = (ndc_x + 1.0f) * 0.5f * W;
-                float py = (ndc_y + 1.0f) * 0.5f * H;
-                int ipx = (int)roundf(px);
-                int ipy = (int)roundf(py);
-                bool in_bounds = (ipx >= 0 && ipx < W && ipy >= 0 && ipy < H);
-                float mask_val = 0.0f;
-                if (in_bounds) mask_val = masks_cpu[ci][ipy][ipx][0].item<float>();
-                float mask_sum = masks_cpu[ci].sum().item<float>();
-                float mask_frac = mask_sum / (H * W);
-                std::string status = !in_bounds ? "OUT-OF-BOUNDS" : (mask_val > 0.5f ? "OK (foreground)" : "CARVING!");
-                if (in_bounds && mask_val <= 0.5f) carving_count++;
-                std::cout << "[DIAG]   cam[" << ci << "] " << valid_cam_names[ci]
-                          << "  pixel=(" << ipx << "," << ipy << ")"
-                          << "  mask@center=" << mask_val
-                          << "  mask_fill=" << (mask_frac*100.0f) << "%"
-                          << "  -> " << status << std::endl;
-            }
-            std::cout << "[DIAG] === " << carving_count << "/" << n_valid << " cameras CARVING at volume center ===\n" << std::endl;
-        }
-
-        std::cout << "[INSPECTION] Using " << proj_full.size(0) << " cameras for visual hull" << std::endl;
-
-        std::cout << "[INSPECTION] Volume: (" << lower_corner.x << "," << lower_corner.y << "," << lower_corner.z 
-                  << ") to (" << lower_corner.x+scale << "," << lower_corner.y+scale << "," << lower_corner.z+scale << ")" << std::endl;
-        std::cout << "[INSPECTION] level=" << impl->dataloader->level() << " partial_masks=" << impl->dataloader->partial_masks() << std::endl;
 
         auto [vertices, faces] = torchhull::visual_hull(masks, 
                                                         stacked_depths, 
@@ -327,7 +268,6 @@ GeometryModule::compute_geometry(const glm::mat4& model,
                                                         true);
 
         if (vertices.numel() == 0 || faces.numel() == 0) {
-            std::cerr << "[WARNING] Visual hull returned empty mesh!" << std::endl;
             reconstruction.vertices = torch::empty({0, 3}, torch::kFloat32);
             reconstruction.faces = torch::empty({0, 3}, torch::kInt64);
             reconstruction.normals = torch::empty({0, 3}, torch::kFloat32);
@@ -336,9 +276,110 @@ GeometryModule::compute_geometry(const glm::mat4& model,
             return reconstruction;
         }
 
-        std::cout << "[VH SUCCESS] vertices: " << vertices.sizes() << " faces: " << faces.sizes() << std::endl;
+        // =========================================================================
+        // [MESH CARVER] - NATIVE GPU PORT WITH DIAGNOSTICS
+        // =========================================================================
+        auto v0 = vertices.index({faces.select(1, 0)});
+        auto v1 = vertices.index({faces.select(1, 1)});
+        auto v2 = vertices.index({faces.select(1, 2)});
+        auto face_normals = torch::cross(v1 - v0, v2 - v0, 1);
+        
+        auto temp_normals = torch::zeros_like(vertices);
+        temp_normals.index_add_(0, faces.select(1, 0), face_normals);
+        temp_normals.index_add_(0, faces.select(1, 1), face_normals);
+        temp_normals.index_add_(0, faces.select(1, 2), face_normals);
+        temp_normals = temp_normals / (torch::norm(temp_normals, 2, 1, true) + 1e-8f);
+        
+        auto keep_mask = torch::ones({vertices.size(0)}, torch::TensorOptions().dtype(torch::kBool).device(vertices.device()));
+        auto origin_clip_homo_64 = torch::tensor({0.0, 0.0, 1.0, 0.0}, torch::TensorOptions().dtype(torch::kFloat64).device(vertices.device()));
 
-        torch::Tensor normals = torch::zeros_like(vertices);
+        int n_valid = (int)proj_full.size(0);
+        for (int ci = 0; ci < n_valid; ++ci) 
+        {
+            if (valid_cam_names[ci].empty() || valid_cam_names[ci][0] != 'D') continue; 
+            
+            int orig_cam_idx = valid_cam_indices[ci];
+            auto P = proj_full[ci];
+            
+            auto P_64 = P.to(torch::kFloat64);
+            auto P_inv_64 = torch::inverse(P_64);
+            auto cam_pos_homo_64 = torch::matmul(P_inv_64, origin_clip_homo_64);
+            auto cam_pos_homo = cam_pos_homo_64.to(torch::kFloat32);
+            auto cam_pos = cam_pos_homo.slice(0, 0, 3) / cam_pos_homo[3];
+            
+            auto raw_depth = depths[orig_cam_idx].to(vertices.device(), torch::kFloat32);
+            
+            // --- FIX: LEAVE FLIP IN PLACE TO UN-FLIP THE DATASET IMPORTER ---
+            raw_depth = raw_depth.flip({0}); 
+            
+            int raw_H = raw_depth.size(0);
+            int raw_W = raw_depth.size(1);
+            
+            auto V = vertices.size(0);
+            auto hom_verts = torch::cat({vertices, torch::ones({V, 1}, vertices.options())}, 1);
+            auto clip_space = torch::matmul(P, hom_verts.t()).t();
+            auto depth_w = clip_space.select(1, 3);
+            auto ndc_x = clip_space.select(1, 0) / depth_w;
+            auto ndc_y = clip_space.select(1, 1) / depth_w;
+            
+            auto pixel_x = ((ndc_x + 1.0f) * 0.5f * raw_W).to(torch::kInt64);
+            auto pixel_y = ((1.0f - ndc_y) * 0.5f * raw_H).to(torch::kInt64); 
+            
+            auto valid_mask = (pixel_x >= 0) & (pixel_x < raw_W) & (pixel_y >= 0) & (pixel_y < raw_H) & (depth_w > 0.1f);
+            auto px_clamped = pixel_x.clamp(0, raw_W - 1);
+            auto py_clamped = pixel_y.clamp(0, raw_H - 1);
+            
+            auto target_depths = raw_depth.index({py_clamped, px_clamped, 0});
+            auto invalid_depth_mask = (target_depths < 0.1f) | (target_depths > 3.9f);
+            
+            auto rays = vertices - cam_pos.unsqueeze(0);
+            rays = rays / (torch::norm(rays, 2, 1, true) + 1e-8f);
+            
+            auto facing_dot = (temp_normals * rays).sum(1);
+            auto is_facing = facing_dot < -0.4f;
+            
+            auto carve_mask_subset = (~invalid_depth_mask) & is_facing & ((depth_w - 0.15f) < (target_depths - 0.02f));
+            auto should_remove = valid_mask & carve_mask_subset;
+            
+            keep_mask = keep_mask & (~should_remove);
+            
+            // --- NO GUESSING TELEMETRY ---
+            std::cout << "\n[NO GUESSING C++ DEBUG - " << valid_cam_names[ci] << "]" << std::endl;
+            if (V > 0) {
+                std::cout << "  -> Camera Pos: [" << cam_pos[0].item<float>() << ", " << cam_pos[1].item<float>() << ", " << cam_pos[2].item<float>() << "]" << std::endl;
+                std::cout << "  -> P Matrix Row 0: [" << P[0][0].item<float>() << ", " << P[0][1].item<float>() << ", " << P[0][2].item<float>() << ", " << P[0][3].item<float>() << "]" << std::endl;
+                std::cout << "  -> Vertex [0] World Pos: [" << vertices[0][0].item<float>() << ", " << vertices[0][1].item<float>() << ", " << vertices[0][2].item<float>() << "]" << std::endl;
+                std::cout << "  -> Vertex [0] Pixel (X,Y): " << pixel_x[0].item<int64_t>() << ", " << pixel_y[0].item<int64_t>() << std::endl;
+                std::cout << "  -> Vertex [0] depth_w: " << depth_w[0].item<float>() << std::endl;
+                std::cout << "  -> Vertex [0] target_depth: " << target_depths[0].item<float>() << std::endl;
+                std::cout << "  -> Vertex [0] facing_dot: " << facing_dot[0].item<float>() << std::endl;
+            }
+            // -----------------------------
+
+            int num_valid = valid_mask.sum().item().toInt();
+            int num_invalid_depth = invalid_depth_mask.index({valid_mask}).sum().item().toInt();
+            int num_facing = is_facing.index({valid_mask}).sum().item().toInt();
+            int num_carved = should_remove.sum().item().toInt();
+            
+            std::cout << "  -> Target Depths Invalid (<0.1 or >3.9): " << num_invalid_depth << std::endl;
+            std::cout << "  -> Normal Shield Passed (facing_dot < -0.4): " << num_facing << std::endl;
+            std::cout << "  -> FINAL EXCISED: " << num_carved << std::endl;
+        }
+
+        int vertices_before = vertices.size(0);
+        vertices = vertices.index({keep_mask});
+
+        auto old_to_new = torch::full({vertices_before}, -1, torch::TensorOptions().dtype(torch::kInt64).device(vertices.device()));
+        auto new_indices = torch::arange(vertices.size(0), torch::TensorOptions().dtype(torch::kInt64).device(vertices.device()));
+        old_to_new.index_put_({keep_mask}, new_indices);
+
+        faces = old_to_new.index({faces});
+        auto valid_faces_mask = (faces.select(1, 0) != -1) & (faces.select(1, 1) != -1) & (faces.select(1, 2) != -1);
+        faces = faces.index({valid_faces_mask});
+
+        std::cout << "[MESH CARVER] Final Output -> Vertices: " << vertices.size(0) << " | Faces: " << faces.size(0) << std::endl;
+        // =========================================================================
+
         torch::Tensor visible_primitives_per_camera = torch::empty({0}, torch::kFloat32);
 
         if(vertices.size(0) > 0)
@@ -363,10 +404,12 @@ GeometryModule::compute_geometry(const glm::mat4& model,
             impl->unmapPrimitiveMaps();
         }
 
-        rift::computeVertexNormals(vertices, normals, faces);
+        torch::Tensor final_normals = torch::zeros_like(vertices);
+        rift::computeVertexNormals(vertices, final_normals, faces);
+        
         reconstruction.vertices           = vertices;
         reconstruction.faces              = faces;
-        reconstruction.normals            = normals;
+        reconstruction.normals            = final_normals;
         reconstruction.visible_primitives = visible_primitives_per_camera;
         reconstruction.current_frame      = impl->dataloader->getLastAvailableFrame();
 
