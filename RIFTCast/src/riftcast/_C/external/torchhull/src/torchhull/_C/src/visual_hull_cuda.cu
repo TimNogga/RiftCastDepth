@@ -1,5 +1,7 @@
 #include <array>
+#include <cstdio>
 #include <type_traits>
+#include <iostream>
 
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/ApplyGridUtils.cuh>
@@ -30,13 +32,16 @@
 namespace torchhull
 {
 
+// =============================================================================
+// EXTENDED DEBUG COUNTER MAPPING (depth_debug array) - SIZE 20
+// =============================================================================
+
 template <typename ImageT, typename IntegralT>
 __global__ void
 check_integral_image(const torch::PackedTensorAccessor64<ImageT, 4, torch::RestrictPtrTraits> image,
                      const torch::PackedTensorAccessor64<IntegralT, 4, torch::RestrictPtrTraits> integral_image,
                      torch::PackedTensorAccessor64<bool, 4, torch::RestrictPtrTraits> valid)
 {
-    // Note: image has dims (N, H, W, C) instead of (N, C, H, W)
     const auto sizes = glm::i64vec3{ image.size(2), image.size(1), image.size(0) };
     const auto channels = image.size(3);
     const auto N = numel(sizes);
@@ -59,9 +64,7 @@ check_integral_image(const torch::PackedTensorAccessor64<ImageT, 4, torch::Restr
 
             if constexpr (std::is_floating_point_v<IntegralT>)
             {
-                // NOTE: Due to the large range of sizes, numerical errors may quickly build up
                 const auto epsilon = IntegralT{ 1e-1 };
-
                 valid[p.z][p.y][p.x][c] =
                         glm::epsilonEqual(static_cast<IntegralT>(image_value), image_value_integral, epsilon);
             }
@@ -76,15 +79,13 @@ check_integral_image(const torch::PackedTensorAccessor64<ImageT, 4, torch::Restr
 torch::Tensor
 integral_image(const torch::Tensor& self, c10::ScalarType dtype)
 {
-    TORCH_CHECK_EQ(self.dim(), 4); // N, H, W, C
+    TORCH_CHECK_EQ(self.dim(), 4); 
 
-    // NOTE: torch::cumsum is limited to 32-bit indices in its internal kernel.
-    //       Thus, tensors with more than 2^32 elements will have broken values at indices beyond this limit.
     auto result = self;
     result = torch::cumsum(result, 1, dtype);
     result = torch::cumsum(result, 2, dtype);
 
-    TORCH_CHECK_EQ(result.dim(), 4); // N, H, W, C
+    TORCH_CHECK_EQ(result.dim(), 4); 
 
     return result;
 }
@@ -169,134 +170,141 @@ template <typename TransformT>
 __global__ void
 classify_children_full(const torch::PackedTensorAccessor64<int64_t, 1, torch::RestrictPtrTraits> candidates,
                        const torch::PackedTensorAccessor64<float, 4, torch::RestrictPtrTraits> integral_masks,
-                       const torch::PackedTensorAccessor64<float, 4, torch::RestrictPtrTraits> depths, // depth added
+                       const torch::PackedTensorAccessor64<float, 4, torch::RestrictPtrTraits> depths, 
                        const torch::PackedTensorAccessor64<TransformT, 3, torch::RestrictPtrTraits> transforms,
                        const bool transforms_in_opengl,
                        const glm::i64vec3 resolution,
                        const glm::i64vec3 resolution_children,
                        const glm::vec3 cube_corner_bfl,
                        const float cube_length,
-                       torch::PackedTensorAccessor64<uint8_t, 1, torch::RestrictPtrTraits> occupied_voxel)
+                       const int current_level, 
+                       const int max_level,
+                       const bool use_tsdf,
+                       torch::PackedTensorAccessor64<uint8_t, 1, torch::RestrictPtrTraits> occupied_voxel,
+                       int64_t* depth_debug)
 {
     const auto N = occupied_voxel.size(0);
-
-    // Note: image has dims (N, H, W, C) instead of (N, C, H, W)
     const auto H = integral_masks.size(1);
     const auto W = integral_masks.size(2);
+    bool apply_depth_carving = use_tsdf && (current_level == max_level - 1);
 
     auto id = static_cast<int64_t>(blockIdx.x) * static_cast<int64_t>(blockDim.x) + static_cast<int64_t>(threadIdx.x);
     auto num_threads = static_cast<int64_t>(gridDim.x) * static_cast<int64_t>(blockDim.x);
+    
     for (auto tid = id; tid < N; tid += num_threads)
     {
         auto candidate_id = tid / 8;
         auto child_id = tid % 8;
-
         auto g = unravel_index(candidates[candidate_id], resolution);
         auto g_child = cube_vertex(int64_t{ 2 } * g, child_id);
 
         auto is_empty = false;
-        [[maybe_unused]] auto is_object = false;
         auto should_refine = false;
-        for (auto batch = int64_t{ 0 }; batch < integral_masks.size(0); ++batch)
-        {
-            auto bb_min = glm::vec2{ FLT_MAX, FLT_MAX };
-            auto bb_max = glm::vec2{ -FLT_MAX, -FLT_MAX };
-            float min_z_voxel = FLT_MAX;
-            for (auto i = 0; i < 8; ++i)
-            {
+        
+        // LOOP 1: 2D SILHOUETTE GATE
+        for (auto batch = int64_t{ 0 }; batch < integral_masks.size(0); ++batch) {
+            float bb_min_x = FLT_MAX, bb_min_y = FLT_MAX; 
+            float bb_max_x = -FLT_MAX, bb_max_y = -FLT_MAX;
+            for (auto i = 0; i < 8; ++i) {
                 auto v = cube_vertex(g_child, i);
-                auto v_world =
-                        glm::vec3{ cube_corner_bfl.x + static_cast<float>(v.x) /
-                                                               static_cast<float>(resolution_children.x) * cube_length,
-                                   cube_corner_bfl.y + static_cast<float>(v.y) /
-                                                               static_cast<float>(resolution_children.y) * cube_length,
-                                   cube_corner_bfl.z + static_cast<float>(v.z) /
-                                                               static_cast<float>(resolution_children.z) *
-                                                               cube_length };
-
+                auto v_world = glm::vec3{ 
+                    cube_corner_bfl.x + static_cast<float>(v.x) / static_cast<float>(resolution_children.x) * cube_length,
+                    cube_corner_bfl.y + static_cast<float>(v.y) / static_cast<float>(resolution_children.y) * cube_length,
+                    cube_corner_bfl.z + static_cast<float>(v.z) / static_cast<float>(resolution_children.z) * cube_length 
+                };
                 auto v_camera = bmm_4x4_transforms(v_world, transforms, batch);
-                float current_z = transforms_in_opengl ? -v_camera.z : v_camera.z;
-                min_z_voxel = fminf(min_z_voxel, current_z);
-
-                auto v_pixel = glm::vec2{};
-                if (transforms_in_opengl)
-                {
-                    auto v_camera_ndc = glm::vec2{ v_camera.x / v_camera.w, v_camera.y / v_camera.w };
-                    v_pixel = glm::vec2{ unnormalize_ndc_false(v_camera_ndc.x, W),
-                                         unnormalize_ndc_false(v_camera_ndc.y, H) };
-                }
-                else
-                {
-                    auto v_camera_cv = glm::vec2{ v_camera.x / v_camera.z, v_camera.y / v_camera.z };
-                    v_pixel = glm::vec2{ align_cv_false(v_camera_cv.x), align_cv_false(v_camera_cv.y) };
-                }
-
-                bb_min.x = fminf(bb_min.x, v_pixel.x);
-                bb_min.y = fminf(bb_min.y, v_pixel.y);
-                bb_max.x = fmaxf(bb_max.x, v_pixel.x);
-                bb_max.y = fmaxf(bb_max.y, v_pixel.y);
+                auto v_pixel = transforms_in_opengl ? 
+                    glm::vec2{unnormalize_ndc_false(v_camera.x/v_camera.w, W), unnormalize_ndc_false(v_camera.y/v_camera.w, H)} :
+                    glm::vec2{align_cv_false(v_camera.x/v_camera.z), align_cv_false(v_camera.y/v_camera.z)};
+                
+                bb_min_x = fminf(bb_min_x, v_pixel.x); bb_min_y = fminf(bb_min_y, v_pixel.y);
+                bb_max_x = fmaxf(bb_max_x, v_pixel.x); bb_max_y = fmaxf(bb_max_y, v_pixel.y);
             }
 
-            const auto ROUND_DOWN = -0.5f;
-            const auto ROUND_UP = 0.5f;
+            int64_t min_x = static_cast<int64_t>(roundf(bb_min_x - 0.5f));
+            int64_t min_y = static_cast<int64_t>(roundf(bb_min_y - 0.5f));
+            int64_t max_x = static_cast<int64_t>(roundf(bb_max_x + 0.5f));
+            int64_t max_y = static_cast<int64_t>(roundf(bb_max_y + 0.5f));
 
-            auto bb_min_rounded = glm::i64vec2{ roundf(bb_min.x + ROUND_DOWN), roundf(bb_min.y + ROUND_DOWN) };
-            auto bb_max_rounded = glm::i64vec2{ roundf(bb_max.x + ROUND_UP), roundf(bb_max.y + ROUND_UP) };
+            min_x = min_x < 0 ? 0 : (min_x > W - 1 ? W - 1 : min_x);
+            min_y = min_y < 0 ? 0 : (min_y > H - 1 ? H - 1 : min_y);
+            max_x = max_x < 0 ? 0 : (max_x > W - 1 ? W - 1 : max_x);
+            max_y = max_y < 0 ? 0 : (max_y > H - 1 ? H - 1 : max_y);
 
-            auto bb_min_border = glm::i64vec2{ glm::clamp<int64_t>(bb_min_rounded.x, 0, W - 1),
-                                               glm::clamp<int64_t>(bb_min_rounded.y, 0, H - 1) };
-            auto bb_max_border = glm::i64vec2{ glm::clamp<int64_t>(bb_max_rounded.x, 0, W - 1),
-                                               glm::clamp<int64_t>(bb_max_rounded.y, 0, H - 1) };
+            auto integral_mask_00 = sample_zeros_padding(integral_masks, min_y - 1, min_x - 1, batch, 0); 
+            auto integral_mask_10 = sample_zeros_padding(integral_masks, max_y, min_x - 1, batch, 0);
+            auto integral_mask_01 = sample_zeros_padding(integral_masks, min_y - 1, max_x, batch, 0);
+            auto integral_mask_11 = sample_zeros_padding(integral_masks, max_y, max_x, batch, 0);
 
-            auto area_bb = (bb_max_border.y - bb_min_border.y + 1) * (bb_max_border.x - bb_min_border.x + 1);
-
-            auto integral_mask_00 =
-                    sample_zeros_padding(integral_masks, bb_min_border.y - 1, bb_min_border.x - 1, batch, 0);
-            auto integral_mask_10 =
-                    sample_zeros_padding(integral_masks, bb_max_border.y, bb_min_border.x - 1, batch, 0);
-            auto integral_mask_01 =
-                    sample_zeros_padding(integral_masks, bb_min_border.y - 1, bb_max_border.x, batch, 0);
-            auto integral_mask_11 = sample_zeros_padding(integral_masks, bb_max_border.y, bb_max_border.x, batch, 0);
-
-            auto integral_bb = integral_mask_11 + integral_mask_00 - integral_mask_10 - integral_mask_01;
-
-            // NOTE: Due to the large range of sizes, numerical errors may quickly build up
-            const auto epsilon = 1e-1f;
-
-            CUDA_DEVICE_CHECK(integral_bb >= 0.f - epsilon);
-            CUDA_DEVICE_CHECK(integral_bb <= static_cast<float>(area_bb) + epsilon);
-
-            // Take the (image) isolevel into account when evaluating the accumulated mask values
-            const auto isolevel = 0.5f;
-            const float margin_isosurface = isolevel - epsilon;
-
-            if (integral_bb <= 0.f + margin_isosurface)
-            {
-                is_empty = true;
-            }
-            else if (integral_bb >= static_cast<float>(area_bb) - margin_isosurface)
-            {
-                is_object = true;
-            }
-            else
-            {
-                should_refine = true;
-            }
-
-           // depth carving updated!
-            int64_t center_x = (bb_min_border.x + bb_max_border.x) / 2;
-            int64_t center_y = (bb_min_border.y + bb_max_border.y) / 2;
-
-            float z_sensor = depths[batch][center_y][center_x][0];
-            float depth_margin = 0.05f; 
-
-            if (z_sensor > 0.0f && min_z_voxel < (z_sensor - depth_margin)) 
-            {
-                is_empty = true; 
-            }
+            auto int_bb = integral_mask_11 + integral_mask_00 - integral_mask_10 - integral_mask_01;
            
+            if (int_bb <= 0.4f) { is_empty = true; break; } else { should_refine = true; }
         }
 
+        if (is_empty) {
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[9]), 1ULL);
+        } else {
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[10]), 1ULL);
+        }
+
+        // 3D DEPTH CARVING
+        if (apply_depth_carving && !is_empty) { 
+            auto v_center_world = glm::vec3{
+                cube_corner_bfl.x + (static_cast<float>(g_child.x) + 0.5f) / static_cast<float>(resolution_children.x) * cube_length,
+                cube_corner_bfl.y + (static_cast<float>(g_child.y) + 0.5f) / static_cast<float>(resolution_children.y) * cube_length,
+                cube_corner_bfl.z + (static_cast<float>(g_child.z) + 0.5f) / static_cast<float>(resolution_children.z) * cube_length
+            }; 
+            
+            for (auto batch = int64_t{ 0 }; batch < depths.size(0); ++batch) {
+                auto v_cam = bmm_4x4_transforms(v_center_world, transforms, batch);
+                
+                // Original robust metric depth 
+                float metric_z = transforms_in_opengl ? fabsf(v_cam.w) : fabsf(v_cam.z);  
+                
+                auto v_px = transforms_in_opengl ? 
+                    glm::vec2{unnormalize_ndc_false(v_cam.x/v_cam.w, W), unnormalize_ndc_false(v_cam.y/v_cam.w, H)} :
+                    glm::vec2{align_cv_false(v_cam.x/v_cam.z), align_cv_false(v_cam.y/v_cam.z)};
+
+                int64_t px = static_cast<int64_t>(roundf(v_px.x));
+                int64_t py = static_cast<int64_t>(roundf(v_px.y));
+
+                if (px >= 1 && px < W - 1 && py >= 1 && py < H - 1) {
+                    atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[5]), 1ULL);
+                    float z_sensor = depths[batch][py][px][0]; 
+                    
+                    if (z_sensor <= 0.1f || z_sensor > 3.9f) { 
+                        atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[2]), 1ULL);
+                    } else {
+                        float dx = fabsf(depths[batch][py][px+1][0] - depths[batch][py][px-1][0]);
+                        float dy = fabsf(depths[batch][py+1][px][0] - depths[batch][py-1][px][0]);
+                        
+                        if (dx > 0.05f || dy > 0.05f) {
+                            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[8]), 1ULL);
+                            continue;
+                        } 
+
+                        constexpr float kDepthCarveBias = -0.15f; 
+                        const float biased_depth = metric_z + kDepthCarveBias;
+
+                        if (z_sensor - biased_depth > 0.30f) {
+                            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[3]), 1ULL);
+                            continue;
+                        }
+
+                        constexpr float kMargin = 0.05f; 
+                        if (biased_depth < z_sensor - kMargin) {
+                            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[0]), 1ULL);
+                            is_empty = true;
+                        } else {
+                            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[4]), 1ULL);
+                        }
+                    }
+                } else {
+                    atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[1]), 1ULL);
+                }
+                if (is_empty) break;
+            }
+        }
         occupied_voxel[tid] = (should_refine && !is_empty);
     }
 }
@@ -312,153 +320,360 @@ classify_children_partial(const torch::PackedTensorAccessor64<int64_t, 1, torch:
                           const glm::i64vec3 resolution_children,
                           const glm::vec3 cube_corner_bfl,
                           const float cube_length,
-                          const bool last_children,
-                          torch::PackedTensorAccessor64<uint8_t, 1, torch::RestrictPtrTraits> occupied_voxel)
+                          const int current_level, 
+                          const int max_level,
+                          const bool use_tsdf,
+                          torch::PackedTensorAccessor64<uint8_t, 1, torch::RestrictPtrTraits> occupied_voxel,
+                          int64_t* depth_debug)
 {
     const auto N = occupied_voxel.size(0);
-
-    // Note: image has dims (N, H, W, C) instead of (N, C, H, W)
     const auto H = integral_masks.size(1);
     const auto W = integral_masks.size(2);
+    
+    bool apply_depth_carving = use_tsdf && (current_level == max_level - 1);
+    const bool last_children = (current_level == max_level - 1);
+
+    auto id = static_cast<int64_t>(blockIdx.x) * static_cast<int64_t>(blockDim.x) + static_cast<int64_t>(threadIdx.x);
+    auto num_threads = static_cast<int64_t>(gridDim.x) * static_cast<int64_t>(blockDim.x);
+    
+    for (auto tid = id; tid < N; tid += num_threads)
+    {
+        auto candidate_id = tid / 8;
+        auto child_id = tid % 8;
+        auto g = unravel_index(candidates[candidate_id], resolution);
+        auto g_child = cube_vertex(int64_t{ 2 } * g, child_id);
+
+        auto is_empty = false;
+        auto should_refine = false;
+        auto fully_inside_one_frame = false;
+        
+        for (auto batch = int64_t{ 0 }; batch < integral_masks.size(0); ++batch) {
+            float bb_min_x = FLT_MAX, bb_min_y = FLT_MAX; 
+            float bb_max_x = -FLT_MAX, bb_max_y = -FLT_MAX;
+            auto fully_inside = true;
+            
+            for (auto i = 0; i < 8; ++i) {
+                auto v = cube_vertex(g_child, i);
+                auto v_world = glm::vec3{ cube_corner_bfl.x + static_cast<float>(v.x) / static_cast<float>(resolution_children.x) * cube_length,
+                                          cube_corner_bfl.y + static_cast<float>(v.y) / static_cast<float>(resolution_children.y) * cube_length,
+                                          cube_corner_bfl.z + static_cast<float>(v.z) / static_cast<float>(resolution_children.z) * cube_length };
+                auto v_camera = bmm_4x4_transforms(v_world, transforms, batch);
+                auto v_pixel = transforms_in_opengl ? 
+                    glm::vec2{unnormalize_ndc_false(v_camera.x/v_camera.w, W), unnormalize_ndc_false(v_camera.y/v_camera.w, H)} :
+                    glm::vec2{align_cv_false(v_camera.x/v_camera.z), align_cv_false(v_camera.y/v_camera.z)};
+
+                bb_min_x = fminf(bb_min_x, v_pixel.x); bb_min_y = fminf(bb_min_y, v_pixel.y);
+                bb_max_x = fmaxf(bb_max_x, v_pixel.x); bb_max_y = fmaxf(bb_max_y, v_pixel.y);
+
+                auto v_px_r = glm::i64vec2{ roundf(v_pixel.x), roundf(v_pixel.y) };
+                if (!in_image(v_px_r.y, v_px_r.x, H, W, 1)) fully_inside = false;
+            }
+
+            int64_t min_x = static_cast<int64_t>(roundf(bb_min_x - 0.5f));
+            int64_t min_y = static_cast<int64_t>(roundf(bb_min_y - 0.5f));
+            int64_t max_x = static_cast<int64_t>(roundf(bb_max_x + 0.5f));
+            int64_t max_y = static_cast<int64_t>(roundf(bb_max_y + 0.5f));
+
+            min_x = min_x < 0 ? 0 : (min_x > W - 1 ? W - 1 : min_x);
+            min_y = min_y < 0 ? 0 : (min_y > H - 1 ? H - 1 : min_y);
+            max_x = max_x < 0 ? 0 : (max_x > W - 1 ? W - 1 : max_x);
+            max_y = max_y < 0 ? 0 : (max_y > H - 1 ? H - 1 : max_y);
+
+            auto area_bb = (max_y - min_y + 1) * (max_x - min_x + 1);
+            auto full_area_bb = (roundf(bb_max_y+0.5f) - roundf(bb_min_y-0.5f) + 1) * (roundf(bb_max_x+0.5f) - roundf(bb_min_x-0.5f) + 1);
+
+            auto integral_mask_00 = sample_zeros_padding(integral_masks, min_y - 1, min_x - 1, batch, 0);
+            auto integral_mask_10 = sample_zeros_padding(integral_masks, max_y, min_x - 1, batch, 0);
+            auto integral_mask_01 = sample_zeros_padding(integral_masks, min_y - 1, max_x, batch, 0);
+            auto integral_mask_11 = sample_zeros_padding(integral_masks, max_y, max_x, batch, 0);
+
+            auto int_bb = integral_mask_11 + integral_mask_00 - integral_mask_10 - integral_mask_01;
+
+            if (int_bb <= 0.4f && area_bb == full_area_bb) is_empty = true;
+            else if (max_y - min_y > 1 && max_x - min_x > 1) should_refine = true;
+
+            fully_inside_one_frame |= fully_inside;
+            if (is_empty) break; 
+        } 
+
+        if (is_empty) {
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[9]), 1ULL);
+        } else {
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[10]), 1ULL);
+        }
+
+        if (apply_depth_carving && !is_empty) {
+            auto v_center_world = glm::vec3{
+                cube_corner_bfl.x + (static_cast<float>(g_child.x) + 0.5f) / static_cast<float>(resolution_children.x) * cube_length,
+                cube_corner_bfl.y + (static_cast<float>(g_child.y) + 0.5f) / static_cast<float>(resolution_children.y) * cube_length,
+                cube_corner_bfl.z + (static_cast<float>(g_child.z) + 0.5f) / static_cast<float>(resolution_children.z) * cube_length
+            };
+            
+            for (auto batch = int64_t{ 0 }; batch < depths.size(0); ++batch) {
+                auto v_cam = bmm_4x4_transforms(v_center_world, transforms, batch);
+                float metric_z = transforms_in_opengl ? fabsf(v_cam.w) : fabsf(v_cam.z);
+                
+                auto v_px = transforms_in_opengl ? 
+                    glm::vec2{unnormalize_ndc_false(v_cam.x/v_cam.w, W), unnormalize_ndc_false(v_cam.y/v_cam.w, H)} :
+                    glm::vec2{align_cv_false(v_cam.x/v_cam.z), align_cv_false(v_cam.y/v_cam.z)};
+
+                int64_t px = static_cast<int64_t>(roundf(v_px.x));
+                int64_t py = static_cast<int64_t>(roundf(v_px.y));
+
+                if (px >= 1 && px < W - 1 && py >= 1 && py < H - 1) {
+                    atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[5]), 1ULL);
+                    float z_sensor = depths[batch][py][px][0];
+                    
+                    if (z_sensor <= 0.1f || z_sensor > 3.9f) {
+                        atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[2]), 1ULL);
+                    } else {
+                        float dx = fabsf(depths[batch][py][px+1][0] - depths[batch][py][px-1][0]);
+                        float dy = fabsf(depths[batch][py+1][px][0] - depths[batch][py-1][px][0]);
+                        
+                        if (dx > 0.05f || dy > 0.05f) {
+                            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[8]), 1ULL);
+                            continue;
+                        }
+
+                        constexpr float kDepthCarveBias = -0.15f; 
+                        float biased_depth = metric_z + kDepthCarveBias;
+
+                        if (z_sensor - biased_depth > 0.30f) {
+                            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[3]), 1ULL);
+                            continue;
+                        }
+
+                        constexpr float kMargin = 0.05f;
+                        if (biased_depth < z_sensor - kMargin) {
+                            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[0]), 1ULL);
+                            is_empty = true;
+                        } else {
+                            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[4]), 1ULL);
+                        }
+                    }
+                } else {
+                    atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[1]), 1ULL);
+                }
+                if (is_empty) break;
+            }
+        }
+        occupied_voxel[tid] = (should_refine && !is_empty && (!last_children || fully_inside_one_frame));
+    }
+}
+
+template <typename MaskT, typename TransformT>
+__global__ void
+accumulate_tsdf_full(const torch::PackedTensorAccessor64<int64_t, 1, torch::RestrictPtrTraits> sparse_indices,
+                     const int64_t N,
+                     const torch::PackedTensorAccessor64<MaskT, 4, torch::RestrictPtrTraits> masks,
+                     const torch::PackedTensorAccessor64<float, 4, torch::RestrictPtrTraits> depths,
+                     const torch::PackedTensorAccessor64<TransformT, 3, torch::RestrictPtrTraits> transforms,
+                     const bool transforms_in_opengl,
+                     const glm::i64vec3 resolution_grid,
+                     const glm::vec3 cube_corner_bfl,
+                     const float cube_length,
+                     const int64_t batch,
+                     torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_vh,
+                     torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_tsdf,
+                     torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_weights,
+                     int64_t* depth_debug)
+{
+    const auto resolution_cells = glm::i64vec3{ resolution_grid.x - 1, resolution_grid.y - 1, resolution_grid.z - 1 };
+    const auto H = masks.size(1); const auto W = masks.size(2);
 
     auto id = static_cast<int64_t>(blockIdx.x) * static_cast<int64_t>(blockDim.x) + static_cast<int64_t>(threadIdx.x);
     auto num_threads = static_cast<int64_t>(gridDim.x) * static_cast<int64_t>(blockDim.x);
     for (auto tid = id; tid < N; tid += num_threads)
     {
-        auto candidate_id = tid / 8;
-        auto child_id = tid % 8;
+        atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[11]), 1ULL);
+        auto g = unravel_index(sparse_indices[tid], resolution_grid);
+        auto g_world = glm::vec3{
+            cube_corner_bfl.x + static_cast<float>(g.x) / static_cast<float>(resolution_cells.x) * cube_length,
+            cube_corner_bfl.y + static_cast<float>(g.y) / static_cast<float>(resolution_cells.y) * cube_length,
+            cube_corner_bfl.z + static_cast<float>(g.z) / static_cast<float>(resolution_cells.z) * cube_length
+        };
 
-        auto g = unravel_index(candidates[candidate_id], resolution);
-        auto g_child = cube_vertex(int64_t{ 2 } * g, child_id);
+        auto g_camera = bmm_4x4_transforms(g_world, transforms, batch);
+        auto g_px = transforms_in_opengl ? 
+            glm::vec2{unnormalize_ndc_false(g_camera.x/g_camera.w, W), unnormalize_ndc_false(g_camera.y/g_camera.w, H)} :
+            glm::vec2{align_cv_false(g_camera.x/g_camera.z), align_cv_false(g_camera.y/g_camera.z)};
+        
+        int64_t px = static_cast<int64_t>(roundf(g_px.x));
+        int64_t py = static_cast<int64_t>(roundf(g_px.y));
 
-        auto is_empty = false;
-        [[maybe_unused]] auto is_object = false;
-        auto should_refine = false;
-        // For partial masks, we assume an overlap at the boundaries so all voxels fully lie within at least one image
-        auto fully_inside_one_frame = false;
-        for (auto batch = int64_t{ 0 }; batch < integral_masks.size(0); ++batch)
-        {
-            auto bb_min = glm::vec2{ FLT_MAX, FLT_MAX };
-            auto bb_max = glm::vec2{ -FLT_MAX, -FLT_MAX };
-            float min_z_voxel = FLT_MAX;
-            auto fully_inside = true;
-            for (auto i = 0; i < 8; ++i)
-            {
-                auto v = cube_vertex(g_child, i);
-                auto v_world =
-                        glm::vec3{ cube_corner_bfl.x + static_cast<float>(v.x) /
-                                                               static_cast<float>(resolution_children.x) * cube_length,
-                                   cube_corner_bfl.y + static_cast<float>(v.y) /
-                                                               static_cast<float>(resolution_children.y) * cube_length,
-                                   cube_corner_bfl.z + static_cast<float>(v.z) /
-                                                               static_cast<float>(resolution_children.z) *
-                                                               cube_length };
+        if (px < 1 || px >= W - 1 || py < 1 || py >= H - 1) {
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[13]), 1ULL);
+            continue;
+        }
 
-                auto v_camera = bmm_4x4_transforms(v_world, transforms, batch);
-                float current_z = transforms_in_opengl ? -v_camera.z : v_camera.z;
-                min_z_voxel = fminf(min_z_voxel, current_z);
+        float mask_val = sample_bilinear_mode_zeros_padding(masks, g_px.y, g_px.x, batch, 0);
+        sparse_vh[tid] *= mask_val; 
+        
+        if (mask_val <= 0.5f) {
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[12]), 1ULL);
+            continue;
+        }
 
-                auto v_pixel = glm::vec2{};
-                if (transforms_in_opengl)
-                {
-                    auto v_camera_ndc = glm::vec2{ v_camera.x / v_camera.w, v_camera.y / v_camera.w };
-                    v_pixel = glm::vec2{ unnormalize_ndc_false(v_camera_ndc.x, W),
-                                         unnormalize_ndc_false(v_camera_ndc.y, H) };
-                }
-                else
-                {
-                    auto v_camera_cv = glm::vec2{ v_camera.x / v_camera.z, v_camera.y / v_camera.z };
-                    v_pixel = glm::vec2{ align_cv_false(v_camera_cv.x), align_cv_false(v_camera_cv.y) };
-                }
+        if (batch >= depths.size(0)) continue;
 
-                bb_min.x = fminf(bb_min.x, v_pixel.x);
-                bb_min.y = fminf(bb_min.y, v_pixel.y);
-                bb_max.x = fmaxf(bb_max.x, v_pixel.x);
-                bb_max.y = fmaxf(bb_max.y, v_pixel.y);
+        float z_sensor = depths[batch][py][px][0];
+        if (z_sensor <= 0.1f || z_sensor > 3.9f) {
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[14]), 1ULL);
+            continue;
+        }
 
-                auto v_pixel_rounded = glm::i64vec2{ roundf(v_pixel.x), roundf(v_pixel.y) };
-                if (!in_image(v_pixel_rounded.y, v_pixel_rounded.x, H, W, 1))
-                {
-                    fully_inside = false;
-                }
-            }
+        float dx = fabsf(depths[batch][py][px+1][0] - depths[batch][py][px-1][0]);
+        float dy = fabsf(depths[batch][py+1][px][0] - depths[batch][py-1][px][0]);
+        if (dx > 0.05f || dy > 0.05f) {
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[15]), 1ULL);
+            continue;
+        }
 
-            const auto ROUND_DOWN = -0.5f;
-            const auto ROUND_UP = 0.5f;
+        float metric_z = transforms_in_opengl ? fabsf(g_camera.w) : fabsf(g_camera.z);
+        constexpr float kDepthCarveBias = -0.15f;
+        float biased_depth = metric_z + kDepthCarveBias;
 
-            auto bb_min_rounded = glm::i64vec2{ roundf(bb_min.x + ROUND_DOWN), roundf(bb_min.y + ROUND_DOWN) };
-            auto bb_max_rounded = glm::i64vec2{ roundf(bb_max.x + ROUND_UP), roundf(bb_max.y + ROUND_UP) };
+        // SDF mapped for fusion: Positive = Inside Object/Solid, Negative = Empty Air
+        float sdf = biased_depth - z_sensor; 
+        
+        if (z_sensor - biased_depth > 0.30f) {
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[16]), 1ULL);
+            continue; 
+        }
 
-            auto bb_min_border = glm::i64vec2{ glm::clamp<int64_t>(bb_min_rounded.x, 0, W - 1),
-                                               glm::clamp<int64_t>(bb_min_rounded.y, 0, H - 1) };
-            auto bb_max_border = glm::i64vec2{ glm::clamp<int64_t>(bb_max_rounded.x, 0, W - 1),
-                                               glm::clamp<int64_t>(bb_max_rounded.y, 0, H - 1) };
-
-            auto area_bb = (bb_max_border.y - bb_min_border.y + 1) * (bb_max_border.x - bb_min_border.x + 1);
-            auto full_area_bb = (bb_max_rounded.y - bb_min_rounded.y + 1) * (bb_max_rounded.x - bb_min_rounded.x + 1);
-
-            auto integral_mask_00 =
-                    sample_zeros_padding(integral_masks, bb_min_border.y - 1, bb_min_border.x - 1, batch, 0);
-            auto integral_mask_10 =
-                    sample_zeros_padding(integral_masks, bb_max_border.y, bb_min_border.x - 1, batch, 0);
-            auto integral_mask_01 =
-                    sample_zeros_padding(integral_masks, bb_min_border.y - 1, bb_max_border.x, batch, 0);
-            auto integral_mask_11 = sample_zeros_padding(integral_masks, bb_max_border.y, bb_max_border.x, batch, 0);
-
-            auto integral_bb = integral_mask_11 + integral_mask_00 - integral_mask_10 - integral_mask_01;
-
-            // NOTE: Due to the large range of sizes, numerical errors may quickly build up
-            const auto epsilon = 1e-1f;
-
-            CUDA_DEVICE_CHECK(integral_bb >= 0.f - epsilon);
-            CUDA_DEVICE_CHECK(integral_bb <= static_cast<float>(area_bb) + epsilon);
-
-            // Take the (image) isolevel into account when evaluating the accumulated mask values
-            const auto isolevel = 0.5f;
-            const float margin_isosurface = isolevel - epsilon;
-
-           if (integral_bb <= 0.f + margin_isosurface && area_bb == full_area_bb)
-            {
-                is_empty = true;
-            }
-            else if (integral_bb >= static_cast<float>(area_bb) - margin_isosurface && area_bb == full_area_bb)
-            {
-                is_object = true;
-            }
-            else if (bb_max_border.y - bb_min_border.y > 1 && bb_max_border.x - bb_min_border.x > 1)
-            {
-                should_refine = true;
-            }
-
-            // ==========================================================
-            // --- NEW: DEPTH CARVING MATH ---
-            // ==========================================================
-            // 1. Find the center pixel of our 2D bounding box
-            int64_t center_x = (bb_min_border.x + bb_max_border.x) / 2;
-            int64_t center_y = (bb_min_border.y + bb_max_border.y) / 2;
-
-            // 2. Sample the exact distance measured by the Orbbec sensor
-            float z_sensor = depths[batch][center_y][center_x][0];
-
-            // 3. Define a tolerance margin (e.g., 5 centimeters)
-            float depth_margin = 0.05f; 
-
-            // 4. THE RULE:
-            // If the sensor actually recorded a surface (z_sensor > 0), 
-            // AND the front of our voxel is physically closer to the camera than that surface...
-            if (z_sensor > 0.0f && min_z_voxel < (z_sensor - depth_margin)) 
-            {
-                is_empty = true; // ...then this voxel is floating in empty air. Carve it!
-            }
-            // ==========================================================
-
-            fully_inside_one_frame |= fully_inside;
-        } 
-
-        // The final verdict: If it's NOT empty, write it to memory.
-        occupied_voxel[tid] = (should_refine && !is_empty && (!last_children || fully_inside_one_frame));
+        constexpr float kTruncMargin = 0.05f; 
+        if (sdf > -kTruncMargin) {
+            float tsdf = fmaxf(fminf(sdf, kTruncMargin), -kTruncMargin);
+            atomicAdd(&sparse_tsdf[tid], tsdf);
+            atomicAdd(&sparse_weights[tid], 1.0f);
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[18]), 1ULL);
+        } else {
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[17]), 1ULL);
+        }
     }
 }
+
+template <typename MaskT, typename TransformT>
+__global__ void
+accumulate_tsdf_partial(const torch::PackedTensorAccessor64<int64_t, 1, torch::RestrictPtrTraits> sparse_indices,
+                        const int64_t N,
+                        const torch::PackedTensorAccessor64<MaskT, 4, torch::RestrictPtrTraits> masks,
+                        const torch::PackedTensorAccessor64<float, 4, torch::RestrictPtrTraits> depths,
+                        const torch::PackedTensorAccessor64<TransformT, 3, torch::RestrictPtrTraits> transforms,
+                        const bool transforms_in_opengl,
+                        const glm::i64vec3 resolution_grid,
+                        const glm::vec3 cube_corner_bfl,
+                        const float cube_length,
+                        const int64_t batch,
+                        torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_vh,
+                        torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_tsdf,
+                        torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_weights,
+                        int64_t* depth_debug)
+{
+    const auto resolution_cells = glm::i64vec3{ resolution_grid.x - 1, resolution_grid.y - 1, resolution_grid.z - 1 };
+    const auto H = masks.size(1); const auto W = masks.size(2);
+
+    auto id = static_cast<int64_t>(blockIdx.x) * static_cast<int64_t>(blockDim.x) + static_cast<int64_t>(threadIdx.x);
+    auto num_threads = static_cast<int64_t>(gridDim.x) * static_cast<int64_t>(blockDim.x);
+    for (auto tid = id; tid < N; tid += num_threads)
+    {
+        atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[11]), 1ULL);
+        auto g = unravel_index(sparse_indices[tid], resolution_grid);
+        auto g_world = glm::vec3{
+            cube_corner_bfl.x + static_cast<float>(g.x) / static_cast<float>(resolution_cells.x) * cube_length,
+            cube_corner_bfl.y + static_cast<float>(g.y) / static_cast<float>(resolution_cells.y) * cube_length,
+            cube_corner_bfl.z + static_cast<float>(g.z) / static_cast<float>(resolution_cells.z) * cube_length
+        };
+
+        auto g_camera = bmm_4x4_transforms(g_world, transforms, batch);
+
+        auto g_px = transforms_in_opengl ? 
+            glm::vec2{unnormalize_ndc_false(g_camera.x/g_camera.w, W), unnormalize_ndc_false(g_camera.y/g_camera.w, H)} :
+            glm::vec2{align_cv_false(g_camera.x/g_camera.z), align_cv_false(g_camera.y/g_camera.z)};
+        
+        int64_t px = static_cast<int64_t>(roundf(g_px.x));
+        int64_t py = static_cast<int64_t>(roundf(g_px.y));
+
+        if (px < 1 || px >= W - 1 || py < 1 || py >= H - 1) {
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[13]), 1ULL);
+            continue;
+        }
+
+        float mask_val = sample_bilinear_mode_ones_padding(masks, g_px.y, g_px.x, batch, 0);
+        sparse_vh[tid] *= mask_val;
+
+        if (mask_val <= 0.5f) {
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[12]), 1ULL);
+            continue;
+        }
+
+        if (batch >= depths.size(0)) continue;
+
+        float z_sensor = depths[batch][py][px][0];
+        if (z_sensor <= 0.1f || z_sensor > 3.9f) {
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[14]), 1ULL);
+            continue;
+        }
+
+        float dx = fabsf(depths[batch][py][px+1][0] - depths[batch][py][px-1][0]);
+        float dy = fabsf(depths[batch][py+1][px][0] - depths[batch][py-1][px][0]);
+        if (dx > 0.05f || dy > 0.05f) {
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[15]), 1ULL);
+            continue;
+        }
+
+        float metric_z = transforms_in_opengl ? fabsf(g_camera.w) : fabsf(g_camera.z);
+        constexpr float kDepthCarveBias = -0.15f; 
+        float biased_depth = metric_z + kDepthCarveBias;
+
+        float sdf = biased_depth - z_sensor;
+        if (z_sensor - biased_depth > 0.30f) {
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[16]), 1ULL);
+            continue;
+        }
+
+        constexpr float kTruncMargin = 0.05f; 
+        if (sdf > -kTruncMargin) {
+            float tsdf = fmaxf(fminf(sdf, kTruncMargin), -kTruncMargin);
+            atomicAdd(&sparse_tsdf[tid], tsdf);
+            atomicAdd(&sparse_weights[tid], 1.0f);
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[18]), 1ULL);
+        } else {
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[17]), 1ULL);
+        }
+    }
+}
+
+__global__ void 
+normalize_tsdf_field(torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_vh,
+                     torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_tsdf,
+                     torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_weights,
+                     int64_t* depth_debug, const int64_t N)
+{
+    auto tid = blockIdx.x * blockDim.x + threadIdx.x;
+    for (int64_t i = tid; i < N; i += gridDim.x * blockDim.x) {
+        float w = sparse_weights[i];
+        float vh = sparse_vh[i];
+
+        if (w > 0.0f) {
+            float avg_sdf = sparse_tsdf[i] / w; 
+            
+            // Maps TSDF to 0.5 isolevel perfectly
+            // Air (-0.05) -> 0.0, Surface (0.0) -> 0.5, Solid (+0.05) -> 1.0
+            constexpr float kTruncMargin = 0.05f;
+            float mapped = (avg_sdf / kTruncMargin) * 0.5f + 0.5f;
+            mapped = fmaxf(0.0f, fminf(1.0f, mapped));
+            
+            sparse_vh[i] = fminf(vh, mapped); 
+            
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[6]), 1ULL);
+        } else {
+            sparse_vh[i] = vh; 
+            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[7]), 1ULL);
+        }
+    }
+}
+
 template <typename MaskT, typename TransformT>
 __global__ void
 accumulate_hull_counts_full(const torch::PackedTensorAccessor64<int64_t, 1, torch::RestrictPtrTraits> sparse_indices,
@@ -473,8 +688,6 @@ accumulate_hull_counts_full(const torch::PackedTensorAccessor64<int64_t, 1, torc
                             torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_values)
 {
     const auto resolution_cells = glm::i64vec3{ resolution_grid.x - 1, resolution_grid.y - 1, resolution_grid.z - 1 };
-
-    // Note: image has dims (N, H, W, C) instead of (N, C, H, W)
     const auto H = masks.size(1);
     const auto W = masks.size(2);
 
@@ -483,7 +696,6 @@ accumulate_hull_counts_full(const torch::PackedTensorAccessor64<int64_t, 1, torc
     for (auto tid = id; tid < N; tid += num_threads)
     {
         auto g = unravel_index(sparse_indices[tid], resolution_grid);
-
         auto g_world = glm::vec3{
             cube_corner_bfl.x + static_cast<float>(g.x) / static_cast<float>(resolution_cells.x) * cube_length,
             cube_corner_bfl.y + static_cast<float>(g.y) / static_cast<float>(resolution_cells.y) * cube_length,
@@ -491,7 +703,6 @@ accumulate_hull_counts_full(const torch::PackedTensorAccessor64<int64_t, 1, torc
         };
 
         auto g_camera = bmm_4x4_transforms(g_world, transforms, batch);
-
         auto g_pixel = glm::vec2{};
         if (transforms_in_opengl)
         {
@@ -522,8 +733,6 @@ accumulate_hull_counts_partial(const torch::PackedTensorAccessor64<int64_t, 1, t
                                torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_values)
 {
     const auto resolution_cells = glm::i64vec3{ resolution_grid.x - 1, resolution_grid.y - 1, resolution_grid.z - 1 };
-
-    // Note: image has dims (N, H, W, C) instead of (N, C, H, W)
     const auto H = masks.size(1);
     const auto W = masks.size(2);
 
@@ -532,7 +741,6 @@ accumulate_hull_counts_partial(const torch::PackedTensorAccessor64<int64_t, 1, t
     for (auto tid = id; tid < N; tid += num_threads)
     {
         auto g = unravel_index(sparse_indices[tid], resolution_grid);
-
         auto g_world = glm::vec3{
             cube_corner_bfl.x + static_cast<float>(g.x) / static_cast<float>(resolution_cells.x) * cube_length,
             cube_corner_bfl.y + static_cast<float>(g.y) / static_cast<float>(resolution_cells.y) * cube_length,
@@ -540,7 +748,6 @@ accumulate_hull_counts_partial(const torch::PackedTensorAccessor64<int64_t, 1, t
         };
 
         auto g_camera = bmm_4x4_transforms(g_world, transforms, batch);
-
         auto g_pixel = glm::vec2{};
         if (transforms_in_opengl)
         {
@@ -553,7 +760,6 @@ accumulate_hull_counts_partial(const torch::PackedTensorAccessor64<int64_t, 1, t
             g_pixel = glm::vec2{ align_cv_false(g_camera_cv.x), align_cv_false(g_camera_cv.y) };
         }
 
-        // For partial masks, only accumulate valid values (no interpolation across the boundary)
         auto g_pixel_rounded = glm::i64vec2{ roundf(g_pixel.x), roundf(g_pixel.y) };
         if (in_image(g_pixel_rounded.y, g_pixel_rounded.x, H, W, 1))
         {
@@ -575,7 +781,6 @@ extract_sparse_indices(const torch::PackedTensorAccessor64<int64_t, 1, torch::Re
     {
         auto g = unravel_index(sparse_indices[tid], resolution_grid);
 
-        // Permute indices to z-y-x order
         sparse_indices_unraveled[0][tid] = 0;
         sparse_indices_unraveled[1][tid] = g.z;
         sparse_indices_unraveled[2][tid] = g.y;
@@ -632,6 +837,8 @@ sparse_visual_hull_field_cuda_ravelled(const torch::Tensor& masks,
                                        const bool masks_partial,
                                        const std::string& transforms_convention)
 {
+    const bool use_tsdf = true; 
+
     TORCH_CHECK_EQ(masks.device(), transforms.device());
     TORCH_CHECK_EQ(masks.dim(), 4);
     TORCH_CHECK_EQ(depths.dim(), 4);                            
@@ -675,18 +882,20 @@ sparse_visual_hull_field_cuda_ravelled(const torch::Tensor& masks,
 
     auto cube_corner_bfl_cuda = glm::vec3{ cube_corner_bfl[0], cube_corner_bfl[1], cube_corner_bfl[2] };
 
-    // 1. Hierarchically compute sparse cells
+    auto depth_debug = torch::zeros({ 20 }, dtype_int64);
+    auto depth_debug_ptr = depth_debug.data_ptr<int64_t>();
+    
     for (int i = 0; i < level; ++i)
     {
         const auto N = 8 * candidates.numel(); 
         const auto resolution = glm::i64vec3{ 1 << i };
         const auto resolution_children = glm::i64vec3{ 1 << (i + 1) }; 
 
-        auto occupied_voxel = torch::empty({ N }, dtype_uint8).contiguous(); // if the child voxel gets carved away it stays zero else it becomes one later on
+        auto occupied_voxel = torch::empty({ N }, dtype_uint8).contiguous(); 
 
         auto candidates_ = candidates.packed_accessor64<int64_t, 1, torch::RestrictPtrTraits>(); 
         auto integral_masks_ = integral_masks.packed_accessor64<float, 4, torch::RestrictPtrTraits>();
-        auto depths_ = depths.packed_accessor64<float, 4, torch::RestrictPtrTraits>(); // depth added 
+        auto depths_ = depths.packed_accessor64<float, 4, torch::RestrictPtrTraits>(); 
         auto occupied_voxel_ = occupied_voxel.packed_accessor64<uint8_t, 1, torch::RestrictPtrTraits>();
 
         AT_DISPATCH_FLOATING_TYPES_AND_HALF(
@@ -712,8 +921,10 @@ sparse_visual_hull_field_cuda_ravelled(const torch::Tensor& masks,
                                                                                        resolution_children,
                                                                                        cube_corner_bfl_cuda,
                                                                                        cube_length,
-                                                                                       i == level - 1,
-                                                                                       occupied_voxel_);
+                                                                                       i, level,
+                                                                                       use_tsdf,
+                                                                                       occupied_voxel_,
+                                                                                       depth_debug_ptr);
                         AT_CUDA_CHECK(cudaGetLastError());
                         AT_CUDA_CHECK(cudaStreamSynchronize(stream));
                     }
@@ -728,7 +939,10 @@ sparse_visual_hull_field_cuda_ravelled(const torch::Tensor& masks,
                                                                                     resolution_children,
                                                                                     cube_corner_bfl_cuda,
                                                                                     cube_length,
-                                                                                    occupied_voxel_);
+                                                                                    i, level,
+                                                                                    use_tsdf,
+                                                                                    occupied_voxel_,
+                                                                                    depth_debug_ptr);
                         AT_CUDA_CHECK(cudaGetLastError());
                         AT_CUDA_CHECK(cudaStreamSynchronize(stream));
                     }
@@ -738,7 +952,6 @@ sparse_visual_hull_field_cuda_ravelled(const torch::Tensor& masks,
         size_t temp_storage_bytes = 0;
         auto num_selected_out = torch::empty({ 1 }, dtype_int64).contiguous();
 
-        // cuda::proclaim_return_type may require a higher CUDA version on Windows, so use this hacky version instead
         auto f = [candidates_, resolution, resolution_children] C10_HOST_DEVICE(const int64_t tid) -> int64_t
         {
 #if defined(__CUDA_ARCH__)
@@ -760,7 +973,6 @@ sparse_visual_hull_field_cuda_ravelled(const torch::Tensor& masks,
 
         auto new_candidates = torch::empty({ N }, dtype_int64).contiguous();
 
-        // Flagged is limited to 32-bit indices at least up to cub 2.6
         TORCH_CHECK_LT(N, (static_cast<int64_t>(1) << 31));
 
         AT_CUDA_CHECK(
@@ -812,10 +1024,8 @@ sparse_visual_hull_field_cuda_ravelled(const torch::Tensor& masks,
                  candidates_octree };
     }
 
-    // Release no longer needed tensors early to reduce memory pressure
     integral_masks = torch::Tensor{};
 
-    // 2. Convert sparse cells to sparse grid indices
     auto all_corners = torch::empty({ 8 * candidates.numel() }, dtype_int64).contiguous();
     auto sparse_indices = torch::empty({ 8 * candidates.numel() }, dtype_int64).contiguous();
 
@@ -842,7 +1052,6 @@ sparse_visual_hull_field_cuda_ravelled(const torch::Tensor& masks,
     size_t temp_storage_bytes = 0;
     auto num_selected_out = torch::empty({ 1 }, dtype_int64).contiguous();
 
-    // Unique is limited to 32-bit indices, at least up to cub 2.6
     TORCH_CHECK_LT(8 * candidates.numel(), (static_cast<int64_t>(1) << 31));
 
     AT_CUDA_CHECK(cub::DeviceSelect::Unique(d_temp_storage,
@@ -866,74 +1075,135 @@ sparse_visual_hull_field_cuda_ravelled(const torch::Tensor& masks,
     AT_CUDA_CHECK(cudaStreamSynchronize(stream));
 
     auto N = num_selected_out.cpu().item<int64_t>();
-
     sparse_indices.resize_({ N });
-
-    // Release no longer needed tensors early to reduce memory pressure
     all_corners = torch::Tensor{};
 
-    // 3. Compute sparse hull counts
-    auto sparse_values = torch::ones({ N }, dtype_float);
-
     auto sparse_indices_ = sparse_indices.packed_accessor64<int64_t, 1, torch::RestrictPtrTraits>();
-    auto sparse_values_ = sparse_values.packed_accessor64<float, 1, torch::RestrictPtrTraits>();
-    AT_DISPATCH_ALL_TYPES_AND(
+
+    auto sparse_values = torch::Tensor{};
+
+    if (use_tsdf) 
+    {
+        sparse_values = torch::ones({ N }, dtype_float);
+        auto sparse_tsdf = torch::zeros({ N }, dtype_float);
+        auto sparse_weights = torch::zeros({ N }, dtype_float);
+        
+        auto sparse_vh_ = sparse_values.packed_accessor64<float, 1, torch::RestrictPtrTraits>();
+        auto sparse_tsdf_ = sparse_tsdf.packed_accessor64<float, 1, torch::RestrictPtrTraits>();
+        auto sparse_weights_ = sparse_weights.packed_accessor64<float, 1, torch::RestrictPtrTraits>();
+        auto depths_ = depths.packed_accessor64<float, 4, torch::RestrictPtrTraits>(); 
+        
+        AT_DISPATCH_ALL_TYPES_AND(
+            torch::ScalarType::Half,
+            masks.scalar_type(),
+            "accumulate_tsdf",
+            [&]()
+            {
+                auto masks_ = masks.packed_accessor64<scalar_t, 4, torch::RestrictPtrTraits>();
+                AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+                    transforms.scalar_type(),
+                    "accumulate_tsdf",
+                    [&]()
+                    {
+                        auto transforms_ = transforms.packed_accessor64<scalar_t, 3, torch::RestrictPtrTraits>();
+                        for (auto batch = int64_t{ 0 }; batch < masks.size(0); ++batch)
+                        {
+                            const int threads_per_block = 128;
+                            dim3 grid_corners;
+                            at::cuda::getApplyGrid(N, grid_corners, masks.device().index(), threads_per_block);
+                            dim3 threads = at::cuda::getApplyBlock(threads_per_block);
+
+                            if (masks_partial) {
+                                accumulate_tsdf_partial<<<grid_corners, threads, 0, stream>>>(
+                                        sparse_indices_, N, masks_, depths_, transforms_, transforms_in_opengl,
+                                        resolution_grid, cube_corner_bfl_cuda, cube_length, batch, sparse_vh_, sparse_tsdf_, sparse_weights_, depth_debug_ptr);
+                            } else {
+                                accumulate_tsdf_full<<<grid_corners, threads, 0, stream>>>(
+                                        sparse_indices_, N, masks_, depths_, transforms_, transforms_in_opengl,
+                                        resolution_grid, cube_corner_bfl_cuda, cube_length, batch, sparse_vh_, sparse_tsdf_, sparse_weights_, depth_debug_ptr);
+                            }
+                            AT_CUDA_CHECK(cudaGetLastError());
+                            AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+                        }
+                    });
+            });
+
+        const int threads_per_block = 128;
+        dim3 grid_norm;
+        at::cuda::getApplyGrid(N, grid_norm, masks.device().index(), threads_per_block);
+        dim3 threads_norm = at::cuda::getApplyBlock(threads_per_block);
+        
+        normalize_tsdf_field<<<grid_norm, threads_norm, 0, stream>>>(sparse_vh_, sparse_tsdf_, sparse_weights_, depth_debug_ptr, N);
+        AT_CUDA_CHECK(cudaGetLastError());
+        AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+
+        auto debug = depth_debug.to(torch::kCPU);
+        std::cout << "\n[TORCHHULL: EXTENDED TSDF METRICS]\n"
+                  << "--- 1. OCTREE 2D SILHOUETTE GATE ---\n"
+                  << "  -> [CLASSIFY] Total Voxels Evaluated: " << debug[9].item<int64_t>() + debug[10].item<int64_t>() << "\n"
+                  << "  -> [CLASSIFY] Empty by 2D Mask: " << debug[9].item<int64_t>() << "\n"
+                  << "  -> [CLASSIFY] Survived 2D Mask: " << debug[10].item<int64_t>() << "\n"
+                  << "--- 2. OCTREE 3D DEPTH CARVING ---\n"
+                  << "  -> [CARVED] Empty Air in Concavity: " << debug[0].item<int64_t>() << "\n"
+                  << "  -> [KEPT] Inside Surface Margin: " << debug[4].item<int64_t>() << "\n"
+                  << "  -> [KEPT] Background Leak Shield: " << debug[3].item<int64_t>() << "\n"
+                  << "  -> [KEPT] Shielded by Edge Gradient: " << debug[8].item<int64_t>() << "\n"
+                  << "  -> [SKIPPED] Out of Pixel Bounds: " << debug[1].item<int64_t>() << "\n"
+                  << "  -> [SKIPPED] Invalid Sensor Range: " << debug[2].item<int64_t>() << "\n"
+                  << "--- 3. TSDF ACCUMULATION ---\n"
+                  << "  -> Boundary Voxels Created (N): " << N << "\n"
+                  << "  -> [TSDF] Total Voxel-Cam Checks: " << debug[11].item<int64_t>() << "\n"
+                  << "  -> [TSDF] Rejected by 2D Mask (<0.5): " << debug[12].item<int64_t>() << "\n"
+                  << "  -> [TSDF] Rejected by Pixel Bounds: " << debug[13].item<int64_t>() << "\n"
+                  << "  -> [TSDF] Rejected by Sensor Range: " << debug[14].item<int64_t>() << "\n"
+                  << "  -> [TSDF] Shielded by Edge Gradient: " << debug[15].item<int64_t>() << "\n"
+                  << "  -> [TSDF] Shielded by Background Ray: " << debug[16].item<int64_t>() << "\n"
+                  << "  -> [TSDF] Skipped (Deep Inside Object): " << debug[17].item<int64_t>() << "\n"
+                  << "  -> [TSDF] Successfully Fused: " << debug[18].item<int64_t>() << "\n"
+                  << "--- 4. SCALAR NORMALIZATION ---\n"
+                  << "  -> [FINAL] Voxels seen by Depth: " << debug[6].item<int64_t>() << "\n"
+                  << "  -> [FINAL] Hidden Voxels (VH Preserved): " << debug[7].item<int64_t>() << "\n\n";
+    }
+    else 
+    {
+        sparse_values = torch::ones({ N }, dtype_float);
+        auto sparse_values_ = sparse_values.packed_accessor64<float, 1, torch::RestrictPtrTraits>();
+
+        AT_DISPATCH_ALL_TYPES_AND(
             torch::ScalarType::Half,
             masks.scalar_type(),
             "accumulate_hull_counts",
             [&]()
             {
                 auto masks_ = masks.packed_accessor64<scalar_t, 4, torch::RestrictPtrTraits>();
-
                 AT_DISPATCH_FLOATING_TYPES_AND_HALF(
-                        transforms.scalar_type(),
-                        "accumulate_hull_counts",
-                        [&]()
+                    transforms.scalar_type(),
+                    "accumulate_hull_counts",
+                    [&]()
+                    {
+                        auto transforms_ = transforms.packed_accessor64<scalar_t, 3, torch::RestrictPtrTraits>();
+                        for (auto batch = int64_t{ 0 }; batch < masks.size(0); ++batch)
                         {
-                            auto transforms_ = transforms.packed_accessor64<scalar_t, 3, torch::RestrictPtrTraits>();
+                            const int threads_per_block = 128;
+                            dim3 grid_corners;
+                            at::cuda::getApplyGrid(N, grid_corners, masks.device().index(), threads_per_block);
+                            dim3 threads = at::cuda::getApplyBlock(threads_per_block);
 
-                            for (auto batch = int64_t{ 0 }; batch < masks.size(0); ++batch)
-                            {
-                                const int threads_per_block = 128;
-                                dim3 grid_corners;
-                                at::cuda::getApplyGrid(N, grid_corners, masks.device().index(), threads_per_block);
-                                dim3 threads = at::cuda::getApplyBlock(threads_per_block);
-
-                                if (masks_partial)
-                                {
-                                    accumulate_hull_counts_partial<<<grid_corners, threads, 0, stream>>>(
-                                            sparse_indices_,
-                                            N,
-                                            masks_,
-                                            transforms_,
-                                            transforms_in_opengl,
-                                            resolution_grid,
-                                            cube_corner_bfl_cuda,
-                                            cube_length,
-                                            batch,
-                                            sparse_values_);
-                                    AT_CUDA_CHECK(cudaGetLastError());
-                                    AT_CUDA_CHECK(cudaStreamSynchronize(stream));
-                                }
-                                else
-                                {
-                                    accumulate_hull_counts_full<<<grid_corners, threads, 0, stream>>>(
-                                            sparse_indices_,
-                                            N,
-                                            masks_,
-                                            transforms_,
-                                            transforms_in_opengl,
-                                            resolution_grid,
-                                            cube_corner_bfl_cuda,
-                                            cube_length,
-                                            batch,
-                                            sparse_values_);
-                                    AT_CUDA_CHECK(cudaGetLastError());
-                                    AT_CUDA_CHECK(cudaStreamSynchronize(stream));
-                                }
+                            if (masks_partial) {
+                                accumulate_hull_counts_partial<<<grid_corners, threads, 0, stream>>>(
+                                        sparse_indices_, N, masks_, transforms_, transforms_in_opengl,
+                                        resolution_grid, cube_corner_bfl_cuda, cube_length, batch, sparse_values_);
+                            } else {
+                                accumulate_hull_counts_full<<<grid_corners, threads, 0, stream>>>(
+                                        sparse_indices_, N, masks_, transforms_, transforms_in_opengl,
+                                        resolution_grid, cube_corner_bfl_cuda, cube_length, batch, sparse_values_);
                             }
-                        });
+                            AT_CUDA_CHECK(cudaGetLastError());
+                            AT_CUDA_CHECK(cudaStreamSynchronize(stream));
+                        }
+                    });
             });
+    }
 
     return { RavelledSparseTensor{ sparse_indices,
                                    sparse_values,
@@ -998,7 +1268,6 @@ flip_faces(torch::PackedTensorAccessor64<scalar_t, 2, torch::RestrictPtrTraits> 
     auto num_threads = static_cast<int64_t>(gridDim.x) * static_cast<int64_t>(blockDim.x);
     for (auto tid = id; tid < N; tid += num_threads)
     {
-        // Swap entries
         auto temp = faces[tid][1];
         faces[tid][1] = faces[tid][2];
         faces[tid][2] = temp;
@@ -1011,7 +1280,6 @@ to_global_coordinates_and_flip_faces_(std::tuple<torch::Tensor, torch::Tensor>& 
                                       const float cube_length,
                                       const glm::i64vec3& resolution)
 {
-    // Use std::tie as capturing variables from structured bindings in a lambda requires C++20
     auto verts = torch::Tensor{};
     auto faces = torch::Tensor{};
     std::tie(verts, faces) = self;

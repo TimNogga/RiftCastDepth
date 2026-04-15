@@ -276,9 +276,7 @@ GeometryModule::compute_geometry(const glm::mat4& model,
             return reconstruction;
         }
 
-        // =========================================================================
-        // [MESH CARVER] - NATIVE GPU PORT WITH DIAGNOSTICS
-        // =========================================================================
+        
         auto v0 = vertices.index({faces.select(1, 0)});
         auto v1 = vertices.index({faces.select(1, 1)});
         auto v2 = vertices.index({faces.select(1, 2)});
@@ -304,12 +302,9 @@ GeometryModule::compute_geometry(const glm::mat4& model,
             auto P_64 = P.to(torch::kFloat64);
             auto P_inv_64 = torch::inverse(P_64);
             auto cam_pos_homo_64 = torch::matmul(P_inv_64, origin_clip_homo_64);
-            auto cam_pos_homo = cam_pos_homo_64.to(torch::kFloat32);
-            auto cam_pos = cam_pos_homo.slice(0, 0, 3) / cam_pos_homo[3];
+            auto cam_pos = (cam_pos_homo_64.to(torch::kFloat32)).slice(0, 0, 3) / cam_pos_homo_64[3].to(torch::kFloat32);
             
             auto raw_depth = depths[orig_cam_idx].to(vertices.device(), torch::kFloat32);
-            
-            // --- FIX: LEAVE FLIP IN PLACE TO UN-FLIP THE DATASET IMPORTER ---
             raw_depth = raw_depth.flip({0}); 
             
             int raw_H = raw_depth.size(0);
@@ -338,37 +333,19 @@ GeometryModule::compute_geometry(const glm::mat4& model,
             auto facing_dot = (temp_normals * rays).sum(1);
             auto is_facing = facing_dot < -0.4f;
             
-            auto carve_mask_subset = (~invalid_depth_mask) & is_facing & ((depth_w - 0.15f) < (target_depths - 0.02f));
+            auto carve_mask_subset = (~invalid_depth_mask) & is_facing & ((depth_w + 1000.0f) < (target_depths - 0.02f)); 
             auto should_remove = valid_mask & carve_mask_subset;
             
             keep_mask = keep_mask & (~should_remove);
             
-            // --- NO GUESSING TELEMETRY ---
-            std::cout << "\n[NO GUESSING C++ DEBUG - " << valid_cam_names[ci] << "]" << std::endl;
-            if (V > 0) {
-                std::cout << "  -> Camera Pos: [" << cam_pos[0].item<float>() << ", " << cam_pos[1].item<float>() << ", " << cam_pos[2].item<float>() << "]" << std::endl;
-                std::cout << "  -> P Matrix Row 0: [" << P[0][0].item<float>() << ", " << P[0][1].item<float>() << ", " << P[0][2].item<float>() << ", " << P[0][3].item<float>() << "]" << std::endl;
-                std::cout << "  -> Vertex [0] World Pos: [" << vertices[0][0].item<float>() << ", " << vertices[0][1].item<float>() << ", " << vertices[0][2].item<float>() << "]" << std::endl;
-                std::cout << "  -> Vertex [0] Pixel (X,Y): " << pixel_x[0].item<int64_t>() << ", " << pixel_y[0].item<int64_t>() << std::endl;
-                std::cout << "  -> Vertex [0] depth_w: " << depth_w[0].item<float>() << std::endl;
-                std::cout << "  -> Vertex [0] target_depth: " << target_depths[0].item<float>() << std::endl;
-                std::cout << "  -> Vertex [0] facing_dot: " << facing_dot[0].item<float>() << std::endl;
-            }
-            // -----------------------------
-
-            int num_valid = valid_mask.sum().item().toInt();
-            int num_invalid_depth = invalid_depth_mask.index({valid_mask}).sum().item().toInt();
-            int num_facing = is_facing.index({valid_mask}).sum().item().toInt();
-            int num_carved = should_remove.sum().item().toInt();
-            
-            std::cout << "  -> Target Depths Invalid (<0.1 or >3.9): " << num_invalid_depth << std::endl;
-            std::cout << "  -> Normal Shield Passed (facing_dot < -0.4): " << num_facing << std::endl;
-            std::cout << "  -> FINAL EXCISED: " << num_carved << std::endl;
+            std::cout << "[CONCAVITY CUTTER] " << valid_cam_names[ci] << " deleted " << should_remove.sum().item().toInt() << " vertices." << std::endl;
         }
 
+        // Apply deletion
         int vertices_before = vertices.size(0);
         vertices = vertices.index({keep_mask});
 
+        // Remap faces
         auto old_to_new = torch::full({vertices_before}, -1, torch::TensorOptions().dtype(torch::kInt64).device(vertices.device()));
         auto new_indices = torch::arange(vertices.size(0), torch::TensorOptions().dtype(torch::kInt64).device(vertices.device()));
         old_to_new.index_put_({keep_mask}, new_indices);
@@ -378,7 +355,7 @@ GeometryModule::compute_geometry(const glm::mat4& model,
         faces = faces.index({valid_faces_mask});
 
         std::cout << "[MESH CARVER] Final Output -> Vertices: " << vertices.size(0) << " | Faces: " << faces.size(0) << std::endl;
-        // =========================================================================
+       
 
         torch::Tensor visible_primitives_per_camera = torch::empty({0}, torch::kFloat32);
 
@@ -406,10 +383,10 @@ GeometryModule::compute_geometry(const glm::mat4& model,
 
         torch::Tensor final_normals = torch::zeros_like(vertices);
         rift::computeVertexNormals(vertices, final_normals, faces);
-        
+
         reconstruction.vertices           = vertices;
         reconstruction.faces              = faces;
-        reconstruction.normals            = final_normals;
+        reconstruction.normals            = final_normals; 
         reconstruction.visible_primitives = visible_primitives_per_camera;
         reconstruction.current_frame      = impl->dataloader->getLastAvailableFrame();
 

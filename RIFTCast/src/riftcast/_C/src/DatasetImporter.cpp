@@ -170,8 +170,7 @@ std::vector<torch::Tensor> VCIDatasetImporter::getMasks(const uint32_t frame_idx
             native_mask = data.reshape({5328, 4608, 1});
         } else if (size == 1080 * 1920) {
             native_mask = data.reshape({1080, 1920, 1});
-        } else if (size == 1920 * 1080) {
-            native_mask = data.reshape({1920, 1080, 1});
+  
         } else {
             continue;
         }
@@ -314,7 +313,6 @@ std::vector<torch::Tensor> VCIDatasetImporter::getDepths(const uint32_t frame_id
                     }
                     else if(cam_h > 0 && cam_w > 0 && numel == cam_h * cam_w * 3)
                     {
-                        // --- CRITICAL FIX: MATCH PYTHON CHW LAYOUT ---
                         t = t.view({3, cam_h, cam_w}).index({0, torch::indexing::Slice(), torch::indexing::Slice()});
                     }
                     else if(numel % 3 == 0)
@@ -324,7 +322,6 @@ std::vector<torch::Tensor> VCIDatasetImporter::getDepths(const uint32_t frame_id
                         if(gray_numel % guessed_h == 0)
                         {
                             const int64_t guessed_w = gray_numel / guessed_h;
-                            // --- CRITICAL FIX: MATCH PYTHON CHW LAYOUT ---
                             t = t.view({3, guessed_h, guessed_w}).index({0, torch::indexing::Slice(), torch::indexing::Slice()});
                         }
                     }
