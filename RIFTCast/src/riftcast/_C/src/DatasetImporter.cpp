@@ -6,12 +6,39 @@
 #include <fstream>
 #include <filesystem>
 #include <iterator>
+#include <algorithm>
+#include <cctype>
 #include <torch/torch.h>
 
 using json = nlohmann::json;
 
 namespace rift
 {
+namespace
+{
+std::string normalizeDepthFusionMode(std::string mode)
+{
+    std::transform(mode.begin(),
+                   mode.end(),
+                   mode.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    if(mode == "none" || mode == "off" || mode == "no_depth" || mode == "nodepth")
+    {
+        return "none";
+    }
+    if(mode == "synthetic" || mode == "synth" || mode == "synthetic_data")
+    {
+        return "synthetic";
+    }
+    if(mode == "real" || mode == "real_data")
+    {
+        return "real";
+    }
+    return "real";
+}
+} // namespace
+
 DatasetHeader IO::readDatasetHeader(const nlohmann::json& data)
 {
     DatasetHeader header;
@@ -60,6 +87,8 @@ DatasetHeader IO::readDatasetHeader(const nlohmann::json& data)
         header.enable_smoothing   = data["reconstructor"].value("smoothing", true);
         header.kernel_size        = data["reconstructor"].value("kernel_size", 9);
         header.sigma              = data["reconstructor"].value("sigma", 2.0f);
+        header.depth_fusion_mode = normalizeDepthFusionMode(
+                data["reconstructor"].value("depth_fusion_mode", header.depth_fusion_mode));
     }
 
     if(data.contains("server"))

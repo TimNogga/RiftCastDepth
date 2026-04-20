@@ -13,16 +13,3 @@ find_package(OpenCV REQUIRED)
 add_subdirectory(RIFTCast/src/riftcast/_C)
 add_subdirectory(src)
 
-add_executable(test_depth scripts/test_depths.cpp) 
-
-target_link_libraries(test_depth PRIVATE 
-    RIFTCast_lib 
-    atcg_lib 
-    ${TORCH_LIBRARIES} 
-    ${OpenCV_LIBS}
-)
-
-target_include_directories(test_depth PRIVATE 
-    RIFTCast/include
-    ${OpenCV_INCLUDE_DIRS}
-)

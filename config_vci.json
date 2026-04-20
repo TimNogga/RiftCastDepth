@@ -2,9 +2,9 @@
     "type": "VCI_REAL",
     "version": "2.1",
     "dataset": {
-        "frame_count": 251,
+        "frame_count": 25,
         "start_frame": 0,
-        "path": "/home/timnogga/bachelorthesis/biwi_kinect_head_pose/RIFTCast/2026_02_03_orbbec_test",
+        "path": "data/2026_03_20_orbbec_002_standard",
         "camera_path": "calibration_dome.json",
         "flip_images": true,
         "flip_masks": true,
@@ -35,15 +35,16 @@
     "reconstructor": {
         "gpu": 0,
         "floor_offset": 0,
-        "level": 8,
-        "partial_masks": true
+        "level": 9,
+        "partial_masks": false,
+        "smoothing": false
     },
     "renderer": {
         "gpu": 0
     },
     "inpainting": {
         "enable": false,
-        "path": "/home/zingsheim/Documents/Repositories/RIFTCast/inpainting"
+        "path": "inpainting"
     },
     "volume": {
         "position": [

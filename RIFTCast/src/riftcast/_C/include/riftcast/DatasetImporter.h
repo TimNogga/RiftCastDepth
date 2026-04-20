@@ -53,6 +53,8 @@ struct DatasetHeader
     bool has_depth              = false;    
     float depth_scale           = 1000.0f; 
     std::string depth_extension = ".png";   
+    // One of: "none", "real", "synthetic".
+    std::string depth_fusion_mode = "real";
 
     inline std::string type_to_string() const
     {
@@ -280,6 +282,7 @@ public:
     inline bool has_depth() const { return _header.has_depth; }
     inline float depth_scale() const { return _header.depth_scale; }
     inline const std::string& depth_extension() const { return _header.depth_extension; }
+    inline const std::string& depth_fusion_mode() const { return _header.depth_fusion_mode; }
 
 protected:
     /**

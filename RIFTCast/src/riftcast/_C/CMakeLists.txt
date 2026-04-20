@@ -7,7 +7,23 @@ set(CMAKE_CXX_STANDARD 17)
 
 # Ensure CMake looks into your Conda environment for OpenCV
 list(APPEND CMAKE_PREFIX_PATH "$ENV{CONDA_PREFIX}")
+if(DEFINED ENV{CONDA_PREFIX})
+    set(Python_ROOT_DIR "$ENV{CONDA_PREFIX}")
+    set(Python_EXECUTABLE "$ENV{CONDA_PREFIX}/bin/python")
+endif()
+set(Python_FIND_STRATEGY LOCATION)
+set(Python_FIND_VIRTUALENV FIRST)
+find_package(Python REQUIRED COMPONENTS Interpreter Development)
 find_package(OpenCV REQUIRED)
+
+set(RIFTCAST_CURL_LIB "")
+if(UNIX AND EXISTS "/usr/lib/x86_64-linux-gnu/libcurl.so")
+    # Match distro GDAL/HDF5 linkage (CURL_OPENSSL_4 symbols).
+    set(RIFTCAST_CURL_LIB "/usr/lib/x86_64-linux-gnu/libcurl.so")
+else()
+    find_package(CURL REQUIRED)
+    set(RIFTCAST_CURL_LIB CURL::libcurl)
+endif()
 
 enable_language(CUDA)
 set(CMAKE_CUDA_ARCHITECTURES "native")
@@ -55,7 +71,8 @@ target_link_libraries(${target_name} PUBLIC atcg_lib
                                             charonload::torch_python 
                                             Python::Python
                                             HTTPRequest
-                                            ${OpenCV_LIBS}) # Added OpenCV libraries
+                                            ${OpenCV_LIBS}
+                                            ${RIFTCAST_CURL_LIB}) # Added OpenCV libraries
 
 target_include_directories(${target_name} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
                                                  ${PROJECT_SOURCE_DIR}/external/json

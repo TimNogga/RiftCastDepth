@@ -260,22 +260,34 @@ public:
         atcg::Renderer::use();
 
         cam_valid = torch::ones({dataloader->num_cameras()}, atcg::TensorOptions::int32DeviceOptions());
+        const bool depth_fusion_enabled = header.has_depth && header.depth_fusion_mode != "none";
 
-        // Disable D-cameras and cameras with known bad masks
+        // Disable cameras with known bad masks.
         {
             const auto& all_cams = dataloader->getCameras();
             const std::unordered_set<std::string> bad_cams = {"C0024", "C0030", "C1001"};
             auto cam_valid_cpu = cam_valid.to(torch::kCPU);
-            int disabled = 0;
+            int disabled_bad_masks = 0;
+            int disabled_depth_cams = 0;
             for (int i = 0; i < (int)all_cams.size(); ++i) {
-                if ((!all_cams[i].name.empty() && all_cams[i].name[0] == 'D') ||
-                    bad_cams.count(all_cams[i].name)) {
+                if (bad_cams.count(all_cams[i].name)) {
                     cam_valid_cpu[i] = 0;
-                    disabled++;
+                    disabled_bad_masks++;
+                    continue;
+                }
+
+                // In strict no-depth mode, D-cameras must not contribute anything
+                // (neither masks nor depth) to make A/B comparisons unambiguous.
+                if (!depth_fusion_enabled && !all_cams[i].name.empty() && all_cams[i].name[0] == 'D') {
+                    cam_valid_cpu[i] = 0;
+                    disabled_depth_cams++;
                 }
             }
             cam_valid = cam_valid_cpu.to(cam_valid.device());
-            ATCG_INFO("Disabled {} cameras (D + bad masks), {} cameras remain active", disabled, (int)all_cams.size() - disabled);
+            ATCG_INFO("Disabled {} cameras (bad masks) and {} D-cameras (no-depth mode), {} cameras remain active",
+                      disabled_bad_masks,
+                      disabled_depth_cams,
+                      (int)all_cams.size() - disabled_bad_masks - disabled_depth_cams);
         }
 
         atcg::TransformComponent transform;
@@ -388,7 +400,9 @@ public:
                                      {"scale", header.volume_scale}};
             debug["depth"]        = {{"has_depth", header.has_depth},
                                      {"scale", header.depth_scale},
-                                     {"extension", header.depth_extension}};
+                                     {"extension", header.depth_extension},
+                                     {"fusion_mode", header.depth_fusion_mode},
+                                     {"fusion_enabled", depth_fusion_enabled}};
             debug["num_cameras"]  = dataloader->num_cameras();
             debug["num_frames"]   = dataloader->num_frames();
             debug["start_frame"]  = dataloader->start_frame();
@@ -415,9 +429,61 @@ public:
             frame_folder << "frame_" << std::setfill('0') << std::setw(5) << frame_idx;
             std::string frame_folder_str = frame_folder.str();
 
-            // DEBUG: Pass empty depths to disable depth carving
-            std::vector<torch::Tensor> current_depths(dataloader->num_cameras());
-            // std::vector<torch::Tensor> current_depths = dataloader->getDepths(frame_idx, cam_valid);
+            std::vector<torch::Tensor> current_depths;
+            if(depth_fusion_enabled && dataloader->has_depth())
+            {
+                current_depths = dataloader->getDepths(frame_idx, cam_valid);
+
+                if(frame_idx == (int)dataloader->start_frame())
+                {
+                    int valid_depths = 0;
+                    torch::Tensor sample_depth;
+                    for(const auto& depth_tensor : current_depths)
+                    {
+                        if(depth_tensor.defined() && depth_tensor.numel() > 1)
+                        {
+                            valid_depths++;
+                            if(!sample_depth.defined())
+                            {
+                                sample_depth = depth_tensor;
+                            }
+                        }
+                    }
+
+                    if(sample_depth.defined())
+                    {
+                        float min_depth = sample_depth.min().item<float>();
+                        float max_depth = sample_depth.max().item<float>();
+                        ATCG_INFO("Depth debug frame {}: valid_depths={} sample_numel={} min={} max={} (meters)",
+                                  frame_idx,
+                                  valid_depths,
+                                  sample_depth.numel(),
+                                  min_depth,
+                                  max_depth);
+                    }
+                    else
+                    {
+                        ATCG_WARN("Depth debug frame {}: no valid depth tensors found", frame_idx);
+                    }
+                }
+            }
+            else
+            {
+                static bool depth_warned = false;
+                current_depths.assign(dataloader->num_cameras(), torch::Tensor());
+                if(!depth_warned)
+                {
+                    if(!header.has_depth)
+                    {
+                        ATCG_WARN("Depth disabled in dataset header; running without depth carving");
+                    }
+                    else
+                    {
+                        ATCG_WARN("Depth fusion mode is 'none'; running without depth carving");
+                    }
+                    depth_warned = true;
+                }
+            }
 
             if(!arguments.test_only)
             {

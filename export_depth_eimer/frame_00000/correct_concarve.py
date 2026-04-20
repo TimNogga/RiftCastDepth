@@ -50,7 +50,7 @@ def export_final_mesh(vertices_path, faces_path, depth_path, json_path, output_d
     invalid_depth_mask = (target_depths < 0.1) | (target_depths > 3.9) 
 
     # Lock to requested -0.4 angle threshold
-    angle_threshold = -0.4
+    angle_threshold = -0.4  
     is_facing = facing_dot[valid_mask] < angle_threshold
     
     # Identify vertices to be carved (deleted)

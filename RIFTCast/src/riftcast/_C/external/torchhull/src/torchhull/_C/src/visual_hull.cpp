@@ -18,7 +18,8 @@ sparse_visual_hull_field_cuda_ravelled(const torch::Tensor& masks,
                                        const std::array<float, 3>& cube_corner_bfl,
                                        const float cube_length,
                                        const bool masks_partial,
-                                       const std::string& transforms_convention);
+                                       const std::string& transforms_convention,
+                                       const int depth_fusion_preset);
 
 std::tuple<torch::Tensor, torch::Tensor>
 marching_cubes_cuda_sparse(const RavelledSparseTensor& sparse_volume,
@@ -41,7 +42,8 @@ visual_hull_cuda(const torch::Tensor& masks,
                  const float cube_length,
                  const bool masks_partial,
                  const std::string& transforms_convention,
-                 const bool unique_verts)
+                 const bool unique_verts,
+                 const int depth_fusion_preset)
 {
     auto [volume, _] = sparse_visual_hull_field_cuda_ravelled(masks,
                                                               depths,      
@@ -50,11 +52,12 @@ visual_hull_cuda(const torch::Tensor& masks,
                                                               cube_corner_bfl,
                                                               cube_length,
                                                               masks_partial,
-                                                              transforms_convention);
+                                                              transforms_convention,
+                                                              depth_fusion_preset);
 
     auto isolevel = 0.5f;
     auto mesh = marching_cubes_cuda_sparse(volume, isolevel, false, unique_verts);
-
+        
     to_global_coordinates_and_flip_faces_(mesh, cube_corner_bfl, cube_length, glm::i64vec3{ 1 << level });
 
     return mesh;
@@ -69,7 +72,8 @@ visual_hull(const torch::Tensor& masks,
             const float cube_length,
             const bool masks_partial,
             const std::string& transforms_convention,
-            const bool unique_verts)
+            const bool unique_verts,
+            const int depth_fusion_preset)
 {
     if (masks.is_cuda())
     {
@@ -81,7 +85,8 @@ visual_hull(const torch::Tensor& masks,
                                 cube_length,
                                 masks_partial,
                                 transforms_convention,
-                                unique_verts);
+                                unique_verts,
+                                depth_fusion_preset);
     }
 
     TORCH_CHECK(false, "No backend implementation available for device \"" + masks.device().str() + "\".");
@@ -96,7 +101,8 @@ visual_hull_cuda_with_candidate_voxels_cuda(const torch::Tensor& masks,
                                             const float cube_length,
                                             const bool masks_partial,
                                             const std::string& transforms_convention,
-                                            const bool unique_verts)
+                                            const bool unique_verts,
+                                            const int depth_fusion_preset)
 {
     auto [volume, candidates_octree] = sparse_visual_hull_field_cuda_ravelled(masks,
                                                                               depths,
@@ -105,7 +111,8 @@ visual_hull_cuda_with_candidate_voxels_cuda(const torch::Tensor& masks,
                                                                               cube_corner_bfl,
                                                                               cube_length,
                                                                               masks_partial,
-                                                                              transforms_convention);
+                                                                              transforms_convention,
+                                                                              depth_fusion_preset);
 
     auto isolevel = 0.5f;
     auto mesh = marching_cubes_cuda_sparse(volume, isolevel, false, unique_verts);
@@ -124,7 +131,8 @@ visual_hull_with_candidate_voxels(const torch::Tensor& masks,
                                   const float cube_length,
                                   const bool masks_partial,
                                   const std::string& transforms_convention,
-                                  const bool unique_verts)
+                                  const bool unique_verts,
+                                  const int depth_fusion_preset)
 {
     if (masks.is_cuda())
     {
@@ -136,7 +144,8 @@ visual_hull_with_candidate_voxels(const torch::Tensor& masks,
                                                            cube_length,
                                                            masks_partial,
                                                            transforms_convention,
-                                                           unique_verts);
+                                                           unique_verts,
+                                                           depth_fusion_preset);
     }
 
     TORCH_CHECK(false, "No backend implementation available for device \"" + masks.device().str() + "\".");
@@ -171,7 +180,8 @@ sparse_visual_hull_field_cuda(const torch::Tensor& masks,
                               const std::array<float, 3>& cube_corner_bfl,
                               const float cube_length,
                               const bool masks_partial,
-                              const std::string& transforms_convention);
+                              const std::string& transforms_convention,
+                              const int depth_fusion_preset);
 
 torch::Tensor
 sparse_visual_hull_field(const torch::Tensor& masks,
@@ -181,7 +191,8 @@ sparse_visual_hull_field(const torch::Tensor& masks,
                          const std::array<float, 3>& cube_corner_bfl,
                          const float cube_length,
                          const bool masks_partial,
-                         const std::string& transforms_convention)
+                         const std::string& transforms_convention,
+                         const int depth_fusion_preset)
 {
     if (masks.is_cuda())
     {
@@ -192,7 +203,8 @@ sparse_visual_hull_field(const torch::Tensor& masks,
                                              cube_corner_bfl,
                                              cube_length,
                                              masks_partial,
-                                             transforms_convention);
+                                             transforms_convention,
+                                             depth_fusion_preset);
     }
 
     TORCH_CHECK(false, "No backend implementation available for device \"" + masks.device().str() + "\".");

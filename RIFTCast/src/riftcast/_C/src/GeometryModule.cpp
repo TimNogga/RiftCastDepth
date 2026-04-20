@@ -13,6 +13,37 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 #include <torch/torch.h>
+#include <algorithm>
+#include <cctype>
+
+namespace
+{
+int parseDepthFusionPreset(const std::string& raw_mode)
+{
+    std::string mode = raw_mode;
+    std::transform(mode.begin(),
+                   mode.end(),
+                   mode.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+    if(mode == "none" || mode == "off" || mode == "no_depth" || mode == "nodepth")
+    {
+        return static_cast<int>(torchhull::DepthFusionPreset::NoDepth);
+    }
+    if(mode == "synthetic" || mode == "synth" || mode == "synthetic_data")
+    {
+        return static_cast<int>(torchhull::DepthFusionPreset::SyntheticData);
+    }
+    return static_cast<int>(torchhull::DepthFusionPreset::RealData);
+}
+
+const char* depthFusionPresetToString(const int preset)
+{
+    if(preset == static_cast<int>(torchhull::DepthFusionPreset::NoDepth)) return "none";
+    if(preset == static_cast<int>(torchhull::DepthFusionPreset::SyntheticData)) return "synthetic";
+    return "real";
+}
+} // namespace
 
 namespace rift
 {
@@ -43,6 +74,7 @@ public:
     std::vector<cudaTextureObject_t> host_primitive_texture_handles;
     atcg::DeviceBuffer<cudaTextureObject_t> primitive_texture_handles;
     bool primitive_mapped_vci = false;
+    int depth_fusion_preset = static_cast<int>(torchhull::DepthFusionPreset::RealData);
 };
 
 GeometryModule::Impl::Impl() {}
@@ -62,6 +94,8 @@ void GeometryModule::Impl::init(const uint32_t device_idx, const atcg::ref_ptr<r
 {
     this->device_idx = device_idx;
     this->dataloader = dataloader;
+    this->depth_fusion_preset = parseDepthFusionPreset(dataloader->depth_fusion_mode());
+    ATCG_INFO("GeometryModule depth fusion preset: {}", depthFusionPresetToString(this->depth_fusion_preset));
 
     torch::Device visual_hull_device(torch::kCUDA, device_idx);
     SET_DEVICE(device_idx);
@@ -265,7 +299,8 @@ GeometryModule::compute_geometry(const glm::mat4& model,
                                                         scale,
                                                         impl->dataloader->partial_masks(),
                                                         "opengl",
-                                                        true);
+                                                        true,
+                                                        impl->depth_fusion_preset);
 
         if (vertices.numel() == 0 || faces.numel() == 0) {
             reconstruction.vertices = torch::empty({0, 3}, torch::kFloat32);

@@ -34,6 +34,15 @@ namespace torchhull
 
 // =============================================================================
 // EXTENDED DEBUG COUNTER MAPPING (depth_debug array) - SIZE 20
+// [0] : CLASSIFY - Carved by Depth (Empty Air inside concavity)
+// [1] : CLASSIFY - Invalid Pixel bounds
+// [2] : CLASSIFY - Invalid Sensor Range (e.g. 0 depth)
+// [3] : CLASSIFY - Kept (Background leak / Ray shot past object)
+// [4] : CLASSIFY - Kept (Inside structural margin)
+// [5] : CLASSIFY - Valid lookups attempted
+// [6] : TSDF - Valid Fusions (Voxel seen by depth)
+// [7] : TSDF - Unseen Fallback (Voxel hidden, forced to solid)
+// [8] : CLASSIFY - Shielded by Edge Gradient
 // =============================================================================
 
 template <typename ImageT, typename IntegralT>
@@ -156,6 +165,145 @@ bmm_4x4_transforms(const glm::vec3& v,
 #undef A
 }
 
+namespace
+{
+constexpr float kDepthMinMeters = 0.1f;
+constexpr float kDepthMaxMeters = 3.95f;
+constexpr float kBackgroundDepthDeltaMeters = 0.65f;
+constexpr float kMaxPositiveSdfForFusionMeters = 0.70f;
+constexpr float kDepthSurfaceSlackMeters = 0.00f;
+constexpr float kPositiveSdfThresholdMeters = 0.01f;
+constexpr float kSolidSdfThresholdMeters = -0.08f;
+
+enum class DepthFusionPresetMode : int
+{
+    NoDepth = 0,
+    RealData = 1,
+    SyntheticData = 2,
+};
+
+inline DepthFusionPresetMode
+sanitize_depth_fusion_preset(const int preset_raw)
+{
+    if(preset_raw == static_cast<int>(DepthFusionPresetMode::NoDepth)) return DepthFusionPresetMode::NoDepth;
+    if(preset_raw == static_cast<int>(DepthFusionPresetMode::SyntheticData)) return DepthFusionPresetMode::SyntheticData;
+    return DepthFusionPresetMode::RealData;
+}
+
+inline bool
+depth_fusion_enabled(const DepthFusionPresetMode preset)
+{
+    return preset != DepthFusionPresetMode::NoDepth;
+}
+
+inline bool
+use_synthetic_depth_tuning(const DepthFusionPresetMode preset)
+{
+    return preset == DepthFusionPresetMode::SyntheticData;
+}
+
+inline bool
+use_depth_fallback_neighborhood(const DepthFusionPresetMode preset)
+{
+    return use_synthetic_depth_tuning(preset) ? false : true;
+}
+
+inline int
+depth_edge_radius(const DepthFusionPresetMode preset)
+{
+    return use_synthetic_depth_tuning(preset) ? 2 : 10;
+}
+
+inline float
+depth_edge_threshold(const DepthFusionPresetMode preset)
+{
+    return use_synthetic_depth_tuning(preset) ? 0.06f : 0.04f;
+}
+
+inline float
+concavity_forward_offset_meters(const DepthFusionPresetMode preset)
+{
+    return use_synthetic_depth_tuning(preset) ? 0.02f : 0.24f;
+}
+
+inline float
+carve_boost(const DepthFusionPresetMode preset)
+{
+    return use_synthetic_depth_tuning(preset) ? 0.30f : 0.90f;
+}
+}
+
+template <typename ValueT>
+inline C10_DEVICE float
+sample_depth_with_fallback(const torch::PackedTensorAccessor64<ValueT, 4, torch::RestrictPtrTraits> depths,
+                           const float py,
+                           const float px,
+                           const int batch,
+                           const bool use_depth_fallback)
+{
+    const auto px_i = static_cast<int64_t>(roundf(px));
+    const auto py_i = static_cast<int64_t>(roundf(py));
+    
+    float z_sensor = sample_zeros_padding(depths, py_i, px_i, batch, 0);
+    if (z_sensor > kDepthMinMeters && z_sensor <= kDepthMaxMeters)
+    {
+        return z_sensor;
+    }
+
+    if (!use_depth_fallback)
+    {
+        return 0.0f;
+    }
+
+    float z_best = 0.0f;
+    for (int dy = -1; dy <= 1; ++dy)
+    {
+        for (int dx = -1; dx <= 1; ++dx)
+        {
+            const float z_neighbor = sample_zeros_padding(depths, py_i + dy, px_i + dx, batch, 0);
+            if (z_neighbor > z_best && z_neighbor <= kDepthMaxMeters)
+            {
+                z_best = z_neighbor;
+            }
+        }
+    }
+
+    return z_best;
+}
+
+template <typename ValueT>
+inline C10_DEVICE bool
+is_depth_edge_strong(const torch::PackedTensorAccessor64<ValueT, 4, torch::RestrictPtrTraits> depths,
+                     const float py,
+                     const float px,
+                     const int batch,
+                     const int edge_radius,
+                     const float edge_threshold)
+{
+    const int64_t px_i = static_cast<int64_t>(roundf(px));
+    const int64_t py_i = static_cast<int64_t>(roundf(py));
+
+    float z_center = sample_zeros_padding(depths, py_i, px_i, batch, 0);
+    if (z_center <= kDepthMinMeters || z_center > kDepthMaxMeters) return true;
+
+    const int radius = edge_radius;
+    for (int dy = -radius; dy <= radius; ++dy) {
+        for (int dx = -radius; dx <= radius; ++dx) {
+            if (dx == 0 && dy == 0) continue;
+            
+            float z_neighbor = sample_zeros_padding(depths, py_i + dy, px_i + dx, batch, 0);
+            
+            if (z_neighbor <= kDepthMinMeters || z_neighbor > kDepthMaxMeters) {
+                return true; 
+            }
+            
+            if (fabsf(z_neighbor - z_center) > edge_threshold) {
+                return true; 
+            }
+        }
+    }
+    return false;
+}
 template <typename Pair>
 struct select1st
 {
@@ -186,7 +334,9 @@ classify_children_full(const torch::PackedTensorAccessor64<int64_t, 1, torch::Re
     const auto N = occupied_voxel.size(0);
     const auto H = integral_masks.size(1);
     const auto W = integral_masks.size(2);
-    bool apply_depth_carving = use_tsdf && (current_level == max_level - 1);
+    
+    // FIX: Disabled octree depth carving so it doesn't delete the empty air we need for TSDF
+    bool apply_depth_carving = false; // use_tsdf && (current_level == max_level - 1);
 
     auto id = static_cast<int64_t>(blockIdx.x) * static_cast<int64_t>(blockDim.x) + static_cast<int64_t>(threadIdx.x);
     auto num_threads = static_cast<int64_t>(gridDim.x) * static_cast<int64_t>(blockDim.x);
@@ -201,7 +351,6 @@ classify_children_full(const torch::PackedTensorAccessor64<int64_t, 1, torch::Re
         auto is_empty = false;
         auto should_refine = false;
         
-        // LOOP 1: 2D SILHOUETTE GATE
         for (auto batch = int64_t{ 0 }; batch < integral_masks.size(0); ++batch) {
             float bb_min_x = FLT_MAX, bb_min_y = FLT_MAX; 
             float bb_max_x = -FLT_MAX, bb_max_y = -FLT_MAX;
@@ -247,64 +396,9 @@ classify_children_full(const torch::PackedTensorAccessor64<int64_t, 1, torch::Re
             atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[10]), 1ULL);
         }
 
-        // 3D DEPTH CARVING
-        if (apply_depth_carving && !is_empty) { 
-            auto v_center_world = glm::vec3{
-                cube_corner_bfl.x + (static_cast<float>(g_child.x) + 0.5f) / static_cast<float>(resolution_children.x) * cube_length,
-                cube_corner_bfl.y + (static_cast<float>(g_child.y) + 0.5f) / static_cast<float>(resolution_children.y) * cube_length,
-                cube_corner_bfl.z + (static_cast<float>(g_child.z) + 0.5f) / static_cast<float>(resolution_children.z) * cube_length
-            }; 
-            
-            for (auto batch = int64_t{ 0 }; batch < depths.size(0); ++batch) {
-                auto v_cam = bmm_4x4_transforms(v_center_world, transforms, batch);
-                
-                // Original robust metric depth 
-                float metric_z = transforms_in_opengl ? fabsf(v_cam.w) : fabsf(v_cam.z);  
-                
-                auto v_px = transforms_in_opengl ? 
-                    glm::vec2{unnormalize_ndc_false(v_cam.x/v_cam.w, W), unnormalize_ndc_false(v_cam.y/v_cam.w, H)} :
-                    glm::vec2{align_cv_false(v_cam.x/v_cam.z), align_cv_false(v_cam.y/v_cam.z)};
+        // 3D DEPTH CARVING is disabled here.
+        // It remains solely handled in the TSDF fusion kernels below.
 
-                int64_t px = static_cast<int64_t>(roundf(v_px.x));
-                int64_t py = static_cast<int64_t>(roundf(v_px.y));
-
-                if (px >= 1 && px < W - 1 && py >= 1 && py < H - 1) {
-                    atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[5]), 1ULL);
-                    float z_sensor = depths[batch][py][px][0]; 
-                    
-                    if (z_sensor <= 0.1f || z_sensor > 3.9f) { 
-                        atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[2]), 1ULL);
-                    } else {
-                        float dx = fabsf(depths[batch][py][px+1][0] - depths[batch][py][px-1][0]);
-                        float dy = fabsf(depths[batch][py+1][px][0] - depths[batch][py-1][px][0]);
-                        
-                        if (dx > 0.05f || dy > 0.05f) {
-                            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[8]), 1ULL);
-                            continue;
-                        } 
-
-                        constexpr float kDepthCarveBias = -0.15f; 
-                        const float biased_depth = metric_z + kDepthCarveBias;
-
-                        if (z_sensor - biased_depth > 0.30f) {
-                            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[3]), 1ULL);
-                            continue;
-                        }
-
-                        constexpr float kMargin = 0.05f; 
-                        if (biased_depth < z_sensor - kMargin) {
-                            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[0]), 1ULL);
-                            is_empty = true;
-                        } else {
-                            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[4]), 1ULL);
-                        }
-                    }
-                } else {
-                    atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[1]), 1ULL);
-                }
-                if (is_empty) break;
-            }
-        }
         occupied_voxel[tid] = (should_refine && !is_empty);
     }
 }
@@ -330,7 +424,8 @@ classify_children_partial(const torch::PackedTensorAccessor64<int64_t, 1, torch:
     const auto H = integral_masks.size(1);
     const auto W = integral_masks.size(2);
     
-    bool apply_depth_carving = use_tsdf && (current_level == max_level - 1);
+    // FIX: Disabled octree depth carving so it doesn't delete the empty air we need for TSDF
+    bool apply_depth_carving = false; // use_tsdf && (current_level == max_level - 1);
     const bool last_children = (current_level == max_level - 1);
 
     auto id = static_cast<int64_t>(blockIdx.x) * static_cast<int64_t>(blockDim.x) + static_cast<int64_t>(threadIdx.x);
@@ -402,61 +497,9 @@ classify_children_partial(const torch::PackedTensorAccessor64<int64_t, 1, torch:
             atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[10]), 1ULL);
         }
 
-        if (apply_depth_carving && !is_empty) {
-            auto v_center_world = glm::vec3{
-                cube_corner_bfl.x + (static_cast<float>(g_child.x) + 0.5f) / static_cast<float>(resolution_children.x) * cube_length,
-                cube_corner_bfl.y + (static_cast<float>(g_child.y) + 0.5f) / static_cast<float>(resolution_children.y) * cube_length,
-                cube_corner_bfl.z + (static_cast<float>(g_child.z) + 0.5f) / static_cast<float>(resolution_children.z) * cube_length
-            };
-            
-            for (auto batch = int64_t{ 0 }; batch < depths.size(0); ++batch) {
-                auto v_cam = bmm_4x4_transforms(v_center_world, transforms, batch);
-                float metric_z = transforms_in_opengl ? fabsf(v_cam.w) : fabsf(v_cam.z);
-                
-                auto v_px = transforms_in_opengl ? 
-                    glm::vec2{unnormalize_ndc_false(v_cam.x/v_cam.w, W), unnormalize_ndc_false(v_cam.y/v_cam.w, H)} :
-                    glm::vec2{align_cv_false(v_cam.x/v_cam.z), align_cv_false(v_cam.y/v_cam.z)};
+        // 3D DEPTH CARVING is disabled here.
+        // It remains solely handled in the TSDF fusion kernels below.
 
-                int64_t px = static_cast<int64_t>(roundf(v_px.x));
-                int64_t py = static_cast<int64_t>(roundf(v_px.y));
-
-                if (px >= 1 && px < W - 1 && py >= 1 && py < H - 1) {
-                    atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[5]), 1ULL);
-                    float z_sensor = depths[batch][py][px][0];
-                    
-                    if (z_sensor <= 0.1f || z_sensor > 3.9f) {
-                        atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[2]), 1ULL);
-                    } else {
-                        float dx = fabsf(depths[batch][py][px+1][0] - depths[batch][py][px-1][0]);
-                        float dy = fabsf(depths[batch][py+1][px][0] - depths[batch][py-1][px][0]);
-                        
-                        if (dx > 0.05f || dy > 0.05f) {
-                            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[8]), 1ULL);
-                            continue;
-                        }
-
-                        constexpr float kDepthCarveBias = -0.15f; 
-                        float biased_depth = metric_z + kDepthCarveBias;
-
-                        if (z_sensor - biased_depth > 0.30f) {
-                            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[3]), 1ULL);
-                            continue;
-                        }
-
-                        constexpr float kMargin = 0.05f;
-                        if (biased_depth < z_sensor - kMargin) {
-                            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[0]), 1ULL);
-                            is_empty = true;
-                        } else {
-                            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[4]), 1ULL);
-                        }
-                    }
-                } else {
-                    atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[1]), 1ULL);
-                }
-                if (is_empty) break;
-            }
-        }
         occupied_voxel[tid] = (should_refine && !is_empty && (!last_children || fully_inside_one_frame));
     }
 }
@@ -476,7 +519,13 @@ accumulate_tsdf_full(const torch::PackedTensorAccessor64<int64_t, 1, torch::Rest
                      torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_vh,
                      torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_tsdf,
                      torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_weights,
-                     int64_t* depth_debug)
+                     torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_positive_weights,
+                     torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_solid_weights,
+                     int64_t* depth_debug,
+                     const bool use_depth_fallback,
+                     const int edge_radius,
+                     const float edge_threshold,
+                     const float concavity_forward_offset_meters)
 {
     const auto resolution_cells = glm::i64vec3{ resolution_grid.x - 1, resolution_grid.y - 1, resolution_grid.z - 1 };
     const auto H = masks.size(1); const auto W = masks.size(2);
@@ -494,6 +543,7 @@ accumulate_tsdf_full(const torch::PackedTensorAccessor64<int64_t, 1, torch::Rest
         };
 
         auto g_camera = bmm_4x4_transforms(g_world, transforms, batch);
+        
         auto g_px = transforms_in_opengl ? 
             glm::vec2{unnormalize_ndc_false(g_camera.x/g_camera.w, W), unnormalize_ndc_false(g_camera.y/g_camera.w, H)} :
             glm::vec2{align_cv_false(g_camera.x/g_camera.z), align_cv_false(g_camera.y/g_camera.z)};
@@ -516,40 +566,55 @@ accumulate_tsdf_full(const torch::PackedTensorAccessor64<int64_t, 1, torch::Rest
 
         if (batch >= depths.size(0)) continue;
 
-        float z_sensor = depths[batch][py][px][0];
-        if (z_sensor <= 0.1f || z_sensor > 3.9f) {
+        float z_sensor = sample_depth_with_fallback(
+            depths, g_px.y, g_px.x, static_cast<int>(batch), use_depth_fallback);
+        if (z_sensor <= kDepthMinMeters || z_sensor > kDepthMaxMeters) {
             atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[14]), 1ULL);
             continue;
         }
 
-        float dx = fabsf(depths[batch][py][px+1][0] - depths[batch][py][px-1][0]);
-        float dy = fabsf(depths[batch][py+1][px][0] - depths[batch][py-1][px][0]);
-        if (dx > 0.05f || dy > 0.05f) {
+        if (is_depth_edge_strong(depths, g_px.y, g_px.x, static_cast<int>(batch), edge_radius, edge_threshold)) {
             atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[15]), 1ULL);
             continue;
         }
 
         float metric_z = transforms_in_opengl ? fabsf(g_camera.w) : fabsf(g_camera.z);
-        constexpr float kDepthCarveBias = -0.15f;
-        float biased_depth = metric_z + kDepthCarveBias;
 
-        // SDF mapped for fusion: Positive = Inside Object/Solid, Negative = Empty Air
-        float sdf = biased_depth - z_sensor; 
+        // Standard TSDF Definition: (Sensor Depth) - (Voxel Depth)
+        // Positive = Empty Air (in front of object)
+        // Zero = On Surface
+        // Negative = Solid Inside
+        float sdf = (z_sensor - kDepthSurfaceSlackMeters) - (metric_z - concavity_forward_offset_meters);
+       
         
-        if (z_sensor - biased_depth > 0.30f) {
+        // FIX: Removed truncation continue block. Allow deeply positive SDF to fuse perfectly
+        // so that the entire space in front of the object is reconstructed.
+        /*
+        if (sdf > kMaxPositiveSdfForFusionMeters) {
             atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[16]), 1ULL);
             continue; 
         }
+        */
 
         constexpr float kTruncMargin = 0.05f; 
-        if (sdf > -kTruncMargin) {
-            float tsdf = fmaxf(fminf(sdf, kTruncMargin), -kTruncMargin);
-            atomicAdd(&sparse_tsdf[tid], tsdf);
-            atomicAdd(&sparse_weights[tid], 1.0f);
-            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[18]), 1ULL);
-        } else {
+        if (sdf <= -kTruncMargin) {
+            atomicAdd(&sparse_solid_weights[tid], 1.0f);
             atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[17]), 1ULL);
+            continue;
         }
+
+        float tsdf = fmaxf(fminf(sdf, kTruncMargin), -kTruncMargin);
+        atomicAdd(&sparse_tsdf[tid], tsdf);
+        atomicAdd(&sparse_weights[tid], 1.0f);
+        if (sdf > kPositiveSdfThresholdMeters)
+        {
+            atomicAdd(&sparse_positive_weights[tid], 1.0f);
+        }
+        if (sdf < kSolidSdfThresholdMeters)
+        {
+            atomicAdd(&sparse_solid_weights[tid], 1.0f);
+        }
+        atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[18]), 1ULL);
     }
 }
 
@@ -568,7 +633,13 @@ accumulate_tsdf_partial(const torch::PackedTensorAccessor64<int64_t, 1, torch::R
                         torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_vh,
                         torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_tsdf,
                         torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_weights,
-                        int64_t* depth_debug)
+                        torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_positive_weights,
+                        torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_solid_weights,
+                        int64_t* depth_debug,
+                        const bool use_depth_fallback,
+                        const int edge_radius,
+                        const float edge_threshold,
+                        const float concavity_forward_offset_meters)
 {
     const auto resolution_cells = glm::i64vec3{ resolution_grid.x - 1, resolution_grid.y - 1, resolution_grid.z - 1 };
     const auto H = masks.size(1); const auto W = masks.size(2);
@@ -609,38 +680,51 @@ accumulate_tsdf_partial(const torch::PackedTensorAccessor64<int64_t, 1, torch::R
 
         if (batch >= depths.size(0)) continue;
 
-        float z_sensor = depths[batch][py][px][0];
-        if (z_sensor <= 0.1f || z_sensor > 3.9f) {
+        float z_sensor = sample_depth_with_fallback(
+            depths, g_px.y, g_px.x, static_cast<int>(batch), use_depth_fallback);
+        if (z_sensor <= kDepthMinMeters || z_sensor > kDepthMaxMeters) {
             atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[14]), 1ULL);
             continue;
         }
 
-        float dx = fabsf(depths[batch][py][px+1][0] - depths[batch][py][px-1][0]);
-        float dy = fabsf(depths[batch][py+1][px][0] - depths[batch][py-1][px][0]);
-        if (dx > 0.05f || dy > 0.05f) {
+        if (is_depth_edge_strong(depths, g_px.y, g_px.x, static_cast<int>(batch), edge_radius, edge_threshold)) {
             atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[15]), 1ULL);
             continue;
         }
 
         float metric_z = transforms_in_opengl ? fabsf(g_camera.w) : fabsf(g_camera.z);
-        constexpr float kDepthCarveBias = -0.15f; 
-        float biased_depth = metric_z + kDepthCarveBias;
 
-        float sdf = biased_depth - z_sensor;
-        if (z_sensor - biased_depth > 0.30f) {
+        float sdf = (z_sensor - kDepthSurfaceSlackMeters) - (metric_z - concavity_forward_offset_meters);
+    // atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[16]), 1ULL);
+
+        
+        // FIX: Removed truncation continue block.
+        /*
+        if (sdf > kMaxPositiveSdfForFusionMeters) {
             atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[16]), 1ULL);
             continue;
         }
+        */
 
         constexpr float kTruncMargin = 0.05f; 
-        if (sdf > -kTruncMargin) {
-            float tsdf = fmaxf(fminf(sdf, kTruncMargin), -kTruncMargin);
-            atomicAdd(&sparse_tsdf[tid], tsdf);
-            atomicAdd(&sparse_weights[tid], 1.0f);
-            atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[18]), 1ULL);
-        } else {
+        if (sdf <= -kTruncMargin) {
+            atomicAdd(&sparse_solid_weights[tid], 1.0f);
             atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[17]), 1ULL);
+            continue;
         }
+
+        float tsdf = fmaxf(fminf(sdf, kTruncMargin), -kTruncMargin);
+        atomicAdd(&sparse_tsdf[tid], tsdf);
+        atomicAdd(&sparse_weights[tid], 1.0f);
+        if (sdf > kPositiveSdfThresholdMeters)
+        {
+            atomicAdd(&sparse_positive_weights[tid], 1.0f);
+        }
+        if (sdf < kSolidSdfThresholdMeters)
+        {
+            atomicAdd(&sparse_solid_weights[tid], 1.0f);
+        }
+        atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[18]), 1ULL);
     }
 }
 
@@ -648,7 +732,11 @@ __global__ void
 normalize_tsdf_field(torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_vh,
                      torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_tsdf,
                      torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_weights,
-                     int64_t* depth_debug, const int64_t N)
+                     torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_positive_weights,
+                     torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrTraits> sparse_solid_weights,
+                     int64_t* depth_debug,
+                     const float carve_boost,
+                     const int64_t N)
 {
     auto tid = blockIdx.x * blockDim.x + threadIdx.x;
     for (int64_t i = tid; i < N; i += gridDim.x * blockDim.x) {
@@ -657,11 +745,36 @@ normalize_tsdf_field(torch::PackedTensorAccessor64<float, 1, torch::RestrictPtrT
 
         if (w > 0.0f) {
             float avg_sdf = sparse_tsdf[i] / w; 
+            float positive_w = sparse_positive_weights[i];
+            float solid_w = sparse_solid_weights[i];
+
+            // Any solid evidence from any depth camera vetoes empty carving for this voxel.
+            if (solid_w > 0.0f)
+            {
+                sparse_vh[i] = vh;
+                atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[7]), 1ULL);
+                continue;
+            }
+
+            bool confident_carve = (avg_sdf > kPositiveSdfThresholdMeters) &&
+                                   (positive_w > 0.0f);
+
+            if (!confident_carve)
+            {
+                sparse_vh[i] = vh;
+                atomicAdd(reinterpret_cast<unsigned long long*>(&depth_debug[7]), 1ULL);
+                continue;
+            }
             
             // Maps TSDF to 0.5 isolevel perfectly
-            // Air (-0.05) -> 0.0, Surface (0.0) -> 0.5, Solid (+0.05) -> 1.0
+            // Air (+0.05) -> 0.0, Surface (0.0) -> 0.5, Solid Inside (-0.05) -> 1.0
             constexpr float kTruncMargin = 0.05f;
-            float mapped = (avg_sdf / kTruncMargin) * 0.5f + 0.5f;
+            float mapped = 0.5f - (avg_sdf / kTruncMargin) * 0.5f;
+
+            // Extra carve pressure from positive SDF helps depth concavities win against silhouette-only priors.
+            float carve_bias = fmaxf(avg_sdf, 0.0f) / kTruncMargin;
+            mapped -= carve_boost * carve_bias;
+
             mapped = fmaxf(0.0f, fminf(1.0f, mapped));
             
             sparse_vh[i] = fminf(vh, mapped); 
@@ -835,9 +948,16 @@ sparse_visual_hull_field_cuda_ravelled(const torch::Tensor& masks,
                                        const std::array<float, 3>& cube_corner_bfl,
                                        const float cube_length,
                                        const bool masks_partial,
-                                       const std::string& transforms_convention)
+                                       const std::string& transforms_convention,
+                                       const int depth_fusion_preset)
 {
-    const bool use_tsdf = true; 
+    const auto preset = sanitize_depth_fusion_preset(depth_fusion_preset);
+    const bool use_tsdf = depth_fusion_enabled(preset);
+    const bool use_depth_fallback = use_depth_fallback_neighborhood(preset);
+    const int edge_radius = depth_edge_radius(preset);
+    const float edge_threshold = depth_edge_threshold(preset);
+    const float concavity_forward_offset = concavity_forward_offset_meters(preset);
+    const float tsdf_carve_boost = carve_boost(preset);
 
     TORCH_CHECK_EQ(masks.device(), transforms.device());
     TORCH_CHECK_EQ(masks.dim(), 4);
@@ -1087,10 +1207,14 @@ sparse_visual_hull_field_cuda_ravelled(const torch::Tensor& masks,
         sparse_values = torch::ones({ N }, dtype_float);
         auto sparse_tsdf = torch::zeros({ N }, dtype_float);
         auto sparse_weights = torch::zeros({ N }, dtype_float);
+        auto sparse_positive_weights = torch::zeros({ N }, dtype_float);
+        auto sparse_solid_weights = torch::zeros({ N }, dtype_float);
         
         auto sparse_vh_ = sparse_values.packed_accessor64<float, 1, torch::RestrictPtrTraits>();
         auto sparse_tsdf_ = sparse_tsdf.packed_accessor64<float, 1, torch::RestrictPtrTraits>();
         auto sparse_weights_ = sparse_weights.packed_accessor64<float, 1, torch::RestrictPtrTraits>();
+        auto sparse_positive_weights_ = sparse_positive_weights.packed_accessor64<float, 1, torch::RestrictPtrTraits>();
+        auto sparse_solid_weights_ = sparse_solid_weights.packed_accessor64<float, 1, torch::RestrictPtrTraits>();
         auto depths_ = depths.packed_accessor64<float, 4, torch::RestrictPtrTraits>(); 
         
         AT_DISPATCH_ALL_TYPES_AND(
@@ -1116,11 +1240,13 @@ sparse_visual_hull_field_cuda_ravelled(const torch::Tensor& masks,
                             if (masks_partial) {
                                 accumulate_tsdf_partial<<<grid_corners, threads, 0, stream>>>(
                                         sparse_indices_, N, masks_, depths_, transforms_, transforms_in_opengl,
-                                        resolution_grid, cube_corner_bfl_cuda, cube_length, batch, sparse_vh_, sparse_tsdf_, sparse_weights_, depth_debug_ptr);
+                                        resolution_grid, cube_corner_bfl_cuda, cube_length, batch, sparse_vh_, sparse_tsdf_, sparse_weights_, sparse_positive_weights_, sparse_solid_weights_, depth_debug_ptr,
+                                        use_depth_fallback, edge_radius, edge_threshold, concavity_forward_offset);
                             } else {
                                 accumulate_tsdf_full<<<grid_corners, threads, 0, stream>>>(
                                         sparse_indices_, N, masks_, depths_, transforms_, transforms_in_opengl,
-                                        resolution_grid, cube_corner_bfl_cuda, cube_length, batch, sparse_vh_, sparse_tsdf_, sparse_weights_, depth_debug_ptr);
+                                        resolution_grid, cube_corner_bfl_cuda, cube_length, batch, sparse_vh_, sparse_tsdf_, sparse_weights_, sparse_positive_weights_, sparse_solid_weights_, depth_debug_ptr,
+                                        use_depth_fallback, edge_radius, edge_threshold, concavity_forward_offset);
                             }
                             AT_CUDA_CHECK(cudaGetLastError());
                             AT_CUDA_CHECK(cudaStreamSynchronize(stream));
@@ -1133,7 +1259,15 @@ sparse_visual_hull_field_cuda_ravelled(const torch::Tensor& masks,
         at::cuda::getApplyGrid(N, grid_norm, masks.device().index(), threads_per_block);
         dim3 threads_norm = at::cuda::getApplyBlock(threads_per_block);
         
-        normalize_tsdf_field<<<grid_norm, threads_norm, 0, stream>>>(sparse_vh_, sparse_tsdf_, sparse_weights_, depth_debug_ptr, N);
+        normalize_tsdf_field<<<grid_norm, threads_norm, 0, stream>>>(
+            sparse_vh_,
+            sparse_tsdf_,
+            sparse_weights_,
+            sparse_positive_weights_,
+            sparse_solid_weights_,
+            depth_debug_ptr,
+            tsdf_carve_boost,
+            N);
         AT_CUDA_CHECK(cudaGetLastError());
         AT_CUDA_CHECK(cudaStreamSynchronize(stream));
 
@@ -1144,12 +1278,12 @@ sparse_visual_hull_field_cuda_ravelled(const torch::Tensor& masks,
                   << "  -> [CLASSIFY] Empty by 2D Mask: " << debug[9].item<int64_t>() << "\n"
                   << "  -> [CLASSIFY] Survived 2D Mask: " << debug[10].item<int64_t>() << "\n"
                   << "--- 2. OCTREE 3D DEPTH CARVING ---\n"
-                  << "  -> [CARVED] Empty Air in Concavity: " << debug[0].item<int64_t>() << "\n"
-                  << "  -> [KEPT] Inside Surface Margin: " << debug[4].item<int64_t>() << "\n"
-                  << "  -> [KEPT] Background Leak Shield: " << debug[3].item<int64_t>() << "\n"
-                  << "  -> [KEPT] Shielded by Edge Gradient: " << debug[8].item<int64_t>() << "\n"
-                  << "  -> [SKIPPED] Out of Pixel Bounds: " << debug[1].item<int64_t>() << "\n"
-                  << "  -> [SKIPPED] Invalid Sensor Range: " << debug[2].item<int64_t>() << "\n"
+                  << "  -> [CARVED] Empty Air in Concavity: " << debug[0].item<int64_t>() << " (DISABLED)\n"
+                  << "  -> [KEPT] Inside Surface Margin: " << debug[4].item<int64_t>() << " (DISABLED)\n"
+                  << "  -> [KEPT] Background Leak Shield: " << debug[3].item<int64_t>() << " (DISABLED)\n"
+                  << "  -> [KEPT] Shielded by Edge Gradient: " << debug[8].item<int64_t>() << " (DISABLED)\n"
+                  << "  -> [SKIPPED] Out of Pixel Bounds: " << debug[1].item<int64_t>() << " (DISABLED)\n"
+                  << "  -> [SKIPPED] Invalid Sensor Range: " << debug[2].item<int64_t>() << " (DISABLED)\n"
                   << "--- 3. TSDF ACCUMULATION ---\n"
                   << "  -> Boundary Voxels Created (N): " << N << "\n"
                   << "  -> [TSDF] Total Voxel-Cam Checks: " << debug[11].item<int64_t>() << "\n"
@@ -1157,7 +1291,7 @@ sparse_visual_hull_field_cuda_ravelled(const torch::Tensor& masks,
                   << "  -> [TSDF] Rejected by Pixel Bounds: " << debug[13].item<int64_t>() << "\n"
                   << "  -> [TSDF] Rejected by Sensor Range: " << debug[14].item<int64_t>() << "\n"
                   << "  -> [TSDF] Shielded by Edge Gradient: " << debug[15].item<int64_t>() << "\n"
-                  << "  -> [TSDF] Shielded by Background Ray: " << debug[16].item<int64_t>() << "\n"
+                  << "  -> [TSDF] Shielded by Background Ray: " << debug[16].item<int64_t>() << " (REMOVED)\n"
                   << "  -> [TSDF] Skipped (Deep Inside Object): " << debug[17].item<int64_t>() << "\n"
                   << "  -> [TSDF] Successfully Fused: " << debug[18].item<int64_t>() << "\n"
                   << "--- 4. SCALAR NORMALIZATION ---\n"
@@ -1219,7 +1353,8 @@ sparse_visual_hull_field_cuda(const torch::Tensor& masks,
                               const std::array<float, 3>& cube_corner_bfl,
                               const float cube_length,
                               const bool masks_partial,
-                              const std::string& transforms_convention)
+                              const std::string& transforms_convention,
+                              const int depth_fusion_preset)
 {
     auto [sparse_volume, _] = sparse_visual_hull_field_cuda_ravelled(masks,
                                                                      depths,
@@ -1228,7 +1363,8 @@ sparse_visual_hull_field_cuda(const torch::Tensor& masks,
                                                                      cube_corner_bfl,
                                                                      cube_length,
                                                                      masks_partial,
-                                                                     transforms_convention);
+                                                                     transforms_convention,
+                                                                     depth_fusion_preset);
 
     return to_sparse_coo_tensor(sparse_volume);
 }

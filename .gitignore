@@ -1,38 +1,104 @@
-/build/*
-/build_linux/*
-/build_python/*
-/bin/*
-imgui.ini
-.vscode/*
+# Build and CMake
+/build/
+/build_linux/
+/build_python/
+/build-*/
+/Build/
+/bin/
+/devel/
+/install/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+install_manifest.txt
+compile_commands.json
+Testing/
+.cache/
+vcpkg_installed/
 
-/VCI_data/
-__pycache__
-*.egg-info  
-typings
-docs/processed_README.md
+# Compiled and binary artifacts
+*.d
+*.slo
+*.lo
+*.o
+*.obj
+*.gch
+*.pch
+*.ilk
+*.pdb
+*.so
+*.so.*
+*.dylib
+*.dll
+*.mod
+*.smod
+*.lai
+*.la
+*.a
+*.lib
+*.exe
+*.out
+*.app
+*.dwo
 
-inpainting
-*.png
-*.bin
-*.jpg
-*.mp4
-# Common Python/C++ ignores
+# Python
 __pycache__/
 *.pyc
-build/
-devel/
-install/
+*.pyo
+*.egg-info/
+
+# IDE and environment
 .vscode/
 .idea/
-_previews/2026_02_03_orbbec_test_001.mp4
-*.dll
-_previews/2026_02_03_orbbec_test_001.mp4
-*.dll
-_previews/2026_02_03_orbbec_test_001.mp4
-*.dll
+.venv/
+typings
+
+# Local runtime and temporary artifacts
+imgui.ini
+mesh.obj
 _previews/
-2026_02_03_orbbec_test/frame_00001/
-bonn_tele_bench_001/
-config_vci_2.json
-export_depth_ON_old
+*.tmp
+*.bak
+*.swp
+*.mp4
+
+# Dataset and capture folders
+/data/
+/VCI_data/
+/bonn_tele_bench_001/
+/2026_02_03_orbbec_test/
+/2026_02_03_orbbec_test_001/
+/background/
+
+# Exporter outputs
+/export_*/
+/results__*/
+/output_thesis/
+**/camera_debug.json
+
+# Runtime sweep outputs
+/runtime/logs/
+/runtime/outputs/
+
+# Script-generated artifacts
+/scripts/__pycache__/
+/scripts/thesis_output_angles/
+/scripts/ground_truth_open_box.obj
+
+# Third-party external trees with local/generated assets
+/RIFTCast/src/riftcast/_C/external/atcg_lib/external/
+/RIFTCast/src/riftcast/_C/external/atcg_lib/docs/_static/
+/RIFTCast/src/riftcast/_C/external/atcg_lib/res/
+/RIFTCast/src/riftcast/_C/external/zstd/build/
+/RIFTCast/src/riftcast/_C/external/zstd/doc/images/
+/RIFTCast/src/riftcast/_C/external/zstd/contrib/pzstd/images/
+
+# Local scalar test experiments
+/skalar_tests/
+
+# Local-only helper files
+docs/processed_README.md
 scripts/debug_masks.py
+config_vci_2.json
+bachelor_visualizations.ipynb

@@ -75,8 +75,10 @@ void RenderModule::Impl::init(const uint32_t device_idx,
 
     renderer = atcg::make_ref<atcg::RendererSystem>();
     renderer->init(1600, 900, render_context, shader_manager);
-    renderer->toggleCulling(true);
-    renderer->toggleMSAA(false);
+    
+    // turn off culling since we carve 
+    renderer->toggleCulling(false);
+    renderer->toggleMSAA(true);
 
     atcg::ref_ptr<atcg::Shader> depth_shader = atcg::make_ref<atcg::Shader>("RIFTCast/src/riftcast/_C/shader/"
                                                                             "depth_pass.vs",
@@ -182,7 +184,7 @@ torch::Tensor RenderModule::Impl::findBestCamerasViaDirection(const atcg::ref_pt
     torch::Tensor scores = torch::zeros({(int)cameras.size()}, atcg::TensorOptions::floatHostOptions());
     for(int i = 0; i < cameras.size(); ++i)
     {
-        // --- FIX: BAN DEPTH CAMERAS FROM RGB SELECTION ---
+        // --- PRESERVED FIX: BAN DEPTH CAMERAS FROM RGB SELECTION ---
         if (!cameras[i].name.empty() && cameras[i].name[0] == 'D') {
             scores[i] = -9999.0f; 
         } else {
@@ -268,7 +270,7 @@ void RenderModule::updateState(const GeometryReconstruction& reconstruction,
 
         auto currently_visible = rift::computeVisiblePrimitives(handle, width, height, impl->visual_hull->n_faces());
 
-        // --- CRITICAL FIX: FORCE DEPTH CAMERAS TO BE INVISIBLE FOR TEXTURING ---
+        // --- PRESERVED FIX: FORCE DEPTH CAMERAS TO BE INVISIBLE FOR TEXTURING ---
         torch::Tensor host_vis = currently_visible.to(torch::kCPU);
         const std::vector<rift::CameraData>& all_cams = impl->dataloader->getCameras();
         for (int i = 0; i < all_cams.size(); ++i) {
@@ -339,7 +341,10 @@ void RenderModule::updateState(const GeometryReconstruction& reconstruction,
     torch::Tensor host_flags                     = impl->rgb_valid.to(torch::Device(torch::kCPU));
     auto clear_color                             = impl->renderer->getClearColor();
     impl->renderer->setClearColor(glm::vec4(1));
-    impl->renderer->setCullFace(atcg::CullMode::ATCG_FRONT_FACE_CULLING);
+    
+    // --- COMMENTED OUT CULLING OVERRIDES ---
+    // impl->renderer->setCullFace(atcg::CullMode::ATCG_FRONT_FACE_CULLING);
+    
     int current_id = 0;
     for(uint32_t id = 0; id < impl->dataloader->num_cameras(); ++id)
     {
@@ -357,8 +362,11 @@ void RenderModule::updateState(const GeometryReconstruction& reconstruction,
         impl->renderer->draw(impl->visual_hull, vci_camera, glm::mat4(1), glm::vec3(1), shader);
         ++current_id;
     }
-    impl->renderer->setCullFace(atcg::CullMode::ATCG_BACK_FACE_CULLING);
+    
+    // --- COMMENTED OUT CULLING OVERRIDES ---
+    // impl->renderer->setCullFace(atcg::CullMode::ATCG_BACK_FACE_CULLING);
     // impl->renderer->toggleCulling(false);
+    
     impl->renderer->setClearColor(clear_color);
 
     torch_stream.synchronize();

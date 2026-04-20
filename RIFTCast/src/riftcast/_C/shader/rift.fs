@@ -95,8 +95,7 @@ void main()
             ++num_visible;
 
             // float weight = max(0., dot(fs_in.frag_normal, view_dir)) * max(0.0, -dot(view_dir, view_dir_main));
-            float weight = pow(max(0., dot(fs_in.frag_normal, view_dir)),2.0) * pow(max(0.0, -dot(view_dir, view_dir_main)),16.0);
-            colors[i] = read_color(vec3(projected.xy, float(i)/float(NUM_CAMERAS)));
+            float weight = pow(abs(dot(fs_in.frag_normal, view_dir)), 2.0) * pow(max(0.0, -dot(view_dir, view_dir_main)), 16.0);            colors[i] = read_color(vec3(projected.xy, float(i)/float(NUM_CAMERAS)));
             weights[i] = weight;
         }
     }
