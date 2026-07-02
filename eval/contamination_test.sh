@@ -1,24 +1,5 @@
 #!/usr/bin/env bash
-# contamination_test.sh
-#
-# Empirically shows that the main-loop renders (--exclude_nearest) are silhouette-
-# contaminated and produce inflated PSNR/SSIM/LPIPS compared to the clean hold-out
-# via --test_file.
-#
-# Test cameras: C0005 (id=5), C0026 (id=26), C0037 (id=37)
-# Config used:  real_01_no_depth (VH baseline, no depth — clean comparison)
-# Frame:        0 only (fast)
-#
-# Usage:
-#   bash eval/contamination_test.sh
-#
-# Outputs:
-#   output/contamination_test/
-#       run_a/   <- main-loop renders (contaminated, --exclude_nearest)
-#       run_b/   <- clean test-file renders
-#       results_run_a.json
-#       results_run_b.json
-#       summary.txt
+# Shows that main-loop renders (--exclude_nearest) are silhouette-contaminated vs the clean --test_file hold-out
 
 set -e
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"

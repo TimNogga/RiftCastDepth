@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Box-fill presentation slides: sweep the concavity carve offset so the open
-box progressively fills, rendering a depth view INTO the box opening per slide.
-
-Pipeline per offset value:
-  RIFT_CARVE_OFFSET=v  exporter  -> vertices/faces.bin -> .obj -> depth PNG
-
-Slides go from offset 0.24 (open/hollow) down to 0.00 (filled) = "fill up".
-"""
+"""Box-fill presentation slides: sweep the concavity carve offset so the open"""
 import subprocess, os, sys
 from pathlib import Path
 

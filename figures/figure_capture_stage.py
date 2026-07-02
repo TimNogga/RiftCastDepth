@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Capture-stage figure: 3D layout of the VCI dome with all camera frustums.
-
-- RGB cameras (blue) vs. Orbbec depth cameras (red), each frustum textured with
-  its synchronized image from frame_00000 (depth cameras show the depth map).
-- Semi-transparent cylinder + floor disk sketch the physical stage geometry.
-Output -> output/thesis_evaluation/figures/01_capture_stage.png
-"""
+"""Capture-stage figure: 3D layout of the VCI dome with all camera frustums."""
 import json
 import sys
 from pathlib import Path

@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Dataset showcase, variant: POCKET RESIDUAL. For each depth camera we analytically render the depth
-of a PLAIN sphere (no pockets) with the same intrinsics/extrinsics and subtract it from the real depth
-map. The sphere's own curvature cancels, so only the concave pockets remain (deeper = positive = the
-bowls). Output -> thesis_evaluation/figures/05b_dataset_pocket_residual.png
-"""
+"""Dataset showcase, variant: POCKET RESIDUAL. For each depth camera we analytically render the depth"""
 import json, math
 from pathlib import Path
 import cv2, numpy as np

@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""Decompose reconstruction error vs depth-camera count on the dimpled sphere.
-Produces a multi-panel figure: global chamfer, accuracy vs completeness, and pocket-region
-completeness (the metric that reflects what depth carving actually does)."""
+"""Decompose reconstruction error vs depth-camera count on the dimpled sphere."""
 import argparse, math, itertools
 from pathlib import Path
 import numpy as np, trimesh

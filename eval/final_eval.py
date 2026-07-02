@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""Final thesis evaluation for the dimpled-sphere depth-camera ablation.
-
-Consolidates the whole story into one CSV + one 2-panel figure:
-  (left)  global symmetric Chamfer vs #depth cameras, with the RGB-only (N=0) baseline.
-  (right) region-split COMPLETENESS (GT->recon) for POCKET vs SMOOTH regions vs #depth cameras.
-
-Conclusion this supports: depth carving monotonically improves the concave POCKET regions it is
-designed for, while the SMOOTH convex surface is over-carved by oblique cameras under a single
-global threshold -> global Chamfer is non-monotonic and the wrong headline metric.
-
-Reads the latest carve build's recons (16_grazing_deepair) + RGB-only baseline (17).
-"""
+"""Final thesis evaluation for the dimpled-sphere depth-camera ablation."""
 import itertools, math
 from pathlib import Path
 import numpy as np

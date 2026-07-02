@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Per-slide page counter: the VCI capture dome.
-
-Slide n of TOTAL lights up n cameras around the dome (each aimed at the head
-in the centre) and prints "nn / TOTAL" underneath. Transparent background so
-it drops onto any slide. Two palettes: 'light' (for white decks) and 'dark'.
-
-Outputs:
-  presentation/dome_counter/<theme>/svg/dome_01.svg ... dome_34.svg
-  presentation/dome_counter/<theme>/png/dome_01.png ... dome_34.png
-  presentation/dome_counter/preview_<theme>.html
-"""
+"""Per-slide page counter: the VCI capture dome."""
 import os, math
 
 TOTAL = 34

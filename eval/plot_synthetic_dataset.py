@@ -1,16 +1,5 @@
 #!/usr/bin/env python3
-"""
-Plot of the synthetic open-cube dataset for the thesis.
-
-Four panels:
-  A – 3D scene: camera layout + GT open box geometry
-  B – silhouette renders seen by 4 colour cameras
-  C – depth map seen by D003L (colourised, looking into open face)
-  D – GT open box shown in three orthographic views
-
-Run from repo root:
-    python3 eval/plot_synthetic_dataset.py
-"""
+"""Plot of the synthetic open-cube dataset for the thesis."""
 
 from pathlib import Path
 import json
@@ -222,9 +211,6 @@ def panel_gt_ortho(axes):
 
 def main():
     # Layout:
-    #  Row 0: [3D scene (tall)]  [depth map (tall)]
-    #  Row 1: [4 silhouette renders]
-    #  Row 2: [3 GT ortho views]
 
     fig = plt.figure(figsize=(14, 14))
     fig.suptitle("Synthetic Open-Cube Dataset Overview", fontweight="bold",

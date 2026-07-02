@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""
-Depth-coloured mesh renders for the figuresba ablation study.
-Fixed viewpoint: azim=270°, elev=60°  (chosen from render_test_angles.py sweep).
-
-Produces:
-  output/figuresba/renders/<exp>.png   – one clean render per experiment
-  output/figuresba/comparison.png      – all 5 side-by-side
-  output/figuresba/stats.md            – mesh statistics table
-"""
+"""Depth-coloured mesh renders for the figuresba ablation study."""
 
 import os
 import numpy as np

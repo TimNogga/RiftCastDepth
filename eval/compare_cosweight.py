@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Compare the uniform-average + binary-grazing-gate fusion (output/sweep_1to30) against the
-Curless-Levoy incidence-weighted fusion (output/sweep_1to30_cosweight). One 3-panel figure:
-global Chamfer, pocket completeness, smooth accuracy — vs depth-camera count 1..30.
-"""
+"""Compare the uniform-average + binary-grazing-gate fusion (output/sweep_1to30) against the"""
 import csv
 from pathlib import Path
 import matplotlib

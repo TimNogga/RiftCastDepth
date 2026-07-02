@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""
-Comparative Analysis – Depth-Augmented RIFTCast Experiments
-=============================================================
-Generates mesh-quality and rendered-view comparison plots for the three
-main experiments:
-  exp_01_no_depth        – visual hull, no depth
-  exp_02_depth_tsdf      – visual hull + TSDF depth fusion (cutter off)
-  exp_03_depth_cutter    – visual hull + TSDF + post-MC concavity cutter
-
-Run from repo root:
-    python3 eval/compare.py
-Outputs go to output/evaluation/plots/.
-"""
+"""Comparative Analysis – Depth-Augmented RIFTCast Experiments"""
 
 from pathlib import Path
 import json, sys

@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""
-Chamfer Distance and F-Score evaluation for the synthetic open-cube dataset.
-
-Compares three reconstructions against the GT parametric open box:
-  no_depth   – visual hull, no depth
-  real_data  – TSDF, real-data preset
-  synth_data – TSDF, synthetic-data preset
-
-Run from repo root:
-    python3 eval/chamfer_fscore.py
-
-Outputs → output/evaluation/synthetic/
-"""
+"""Chamfer Distance and F-Score evaluation for the synthetic open-cube dataset."""
 
 from pathlib import Path
 import json

@@ -1,19 +1,5 @@
 #!/usr/bin/env python3
-"""Depth-camera-count evaluation for the dimpled-sphere dataset.
-
-Computes, per depth-camera count N, a set of meaningful reconstruction metrics against the GT mesh
-and writes a CSV + plots. Metrics:
-  - chamfer_global_mm          : symmetric Chamfer over the whole surface
-  - chamfer_pocket_mm          : symmetric Chamfer restricted to the concavity (pocket) region
-  - completeness_pocket_mm     : mean GT->recon distance in pocket region  (does depth FILL the pockets)
-  - accuracy_pocket_mm         : mean recon->GT distance in pocket region
-  - fscore_global / fscore_pocket @ tau : precision/recall F-score at a distance threshold
-  - pocket_depth_mm            : how deep the carve reaches in the pocket directions (recovery of concavity)
-
-Region split uses the angle to the 12 known pocket axes (<18 deg = pocket, >32 deg = smooth).
-The recon frame can be sign-mirrored vs GT (cv_to_gl); we resolve the best axis sign-flip first so
-region assignment and metrics are correct.
-"""
+"""Depth-camera-count evaluation for the dimpled-sphere dataset."""
 import argparse, csv, itertools, math
 from pathlib import Path
 import numpy as np

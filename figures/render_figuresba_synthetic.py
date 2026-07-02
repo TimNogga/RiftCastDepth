@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""
-Depth-coloured mesh renders for the figuresba synthetic ablation study.
-No RGB images (synthetic dataset has no texture).
-
-Produces:
-  output/figuresba/synthetic/renders/<exp>.png   – one clean render per experiment
-  output/figuresba/synthetic/comparison.png      – all 5 side-by-side
-  output/figuresba/synthetic/stats.md            – mesh statistics table
-"""
+"""Depth-coloured mesh renders for the figuresba synthetic ablation study."""
 
 import os
 import numpy as np

@@ -1,20 +1,5 @@
 #!/usr/bin/env bash
-# edge_ablation_metrics.sh
-#
-# Real-data PSNR/SSIM/LPIPS comparison of TSDF depth fusion WITHOUT vs WITH the
-# depth-edge protection.
-#
-#   no_edge : configs/real_03_tsdf_no_edge_gradient.json  (depth_fusion_mode=real_no_edge)
-#   edge    : configs/real_02_tsdf_edge_gradient.json     (depth_fusion_mode=real)
-#
-# Test views are rendered for cams C0005 C0026 C0037 and compared to the real
-# captured images. Both variants use the identical camera setup, so the
-# edge-vs-no-edge delta is a fair comparison. (Note: the exporter's clean
-# hold-out path --calibration/--test_only segfaults in this binary, so test
-# cams also appear in the source set; absolute scores are therefore optimistic
-# but the relative comparison is unaffected.)
-#
-# Outputs -> output/edge_ablation/{no_edge,edge}/ + results_*.json + summary.txt
+# Real-data PSNR/SSIM/LPIPS comparison of TSDF depth fusion without vs with the depth-edge protection
 
 set -e
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"

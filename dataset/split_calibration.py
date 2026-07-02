@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""
-Split a calibration_dome.json into a training and a test calibration file.
-
-Usage:
-    python3 dataset/split_calibration.py \
-        --calib  data/2026_03_20_orbbec_002_standard/calibration_dome.json \
-        --test   C0005 C0026 C0037 \
-        --out    configs/splits/
-
-Produces:
-    configs/splits/calib_train.json   (all cameras EXCEPT test cameras)
-    configs/splits/calib_test.json    (ONLY the test cameras)
-"""
+"""Split a calibration_dome.json into a training and a test calibration file."""
 
 import argparse
 import json

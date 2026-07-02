@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 # Chamfer-distance vs number-of-depth-cameras sweep on the DIMPLED SPHERE dataset.
-# Object = sphere minus spherical pockets on all sides (concavities invisible to silhouettes).
-# Fixed RGB count (constant visual hull); only the depth-camera count varies. More depth cameras
-# -> more pockets recovered -> lower Chamfer. Everything lands under output/dimpled_experiment/.
 set -e
 cd "$(dirname "$0")/.."
 

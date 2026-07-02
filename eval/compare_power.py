@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""Compare incidence-weight exponents p in cos(theta)^p (weighting face-on cameras ever harder)
-against the binary grazing gate. 3 panels: global Chamfer, pocket completeness, smooth accuracy."""
+"""Compare incidence-weight exponents p in cos(theta)^p (weighting face-on cameras ever harder)"""
 import csv
 from pathlib import Path
 import matplotlib

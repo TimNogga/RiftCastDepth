@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""Depth-camera ablation 1..30 on the dimpled sphere, WITHOUT re-rendering per N.
-
-The depth cameras are placed by greedy farthest-point sampling, whose first-N prefix is nested
-(prefix of N+1 contains prefix of N). So we render ONE dataset with 30 depth cameras, then for each
-N=1..30 we hand the exporter a calibration file listing the 60 RGB cameras + the first N depth
-cameras. Metrics: global symmetric Chamfer + region-split pocket/smooth completeness vs GT.
-
-Uses the CURRENT bin/RIFTCast_exporter (= carve build 16_grazing_deepair). Outputs under
-output/sweep_1to30/.
-"""
+"""Depth-camera ablation 1..30 on the dimpled sphere, WITHOUT re-rendering per N."""
 import json, subprocess, itertools, math, os, sys, shutil
 from pathlib import Path
 _OUT_NAME = os.environ.get("SWEEP_OUT", "sweep_1to30")

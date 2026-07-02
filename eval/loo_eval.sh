@@ -1,30 +1,5 @@
 #!/usr/bin/env bash
-# loo_eval.sh
-#
-# Leave-one-out PSNR/SSIM/LPIPS evaluation across ALL color cameras.
-#
-# For each evaluable camera C:
-#   - train calib = every camera EXCEPT C
-#   - test  calib = only C
-#   - reconstruct geometry from the train cams, render the held-out view C,
-#     compare it to the real captured image (GT) for C.
-# Metrics are then averaged over all held-out cameras (true LOO cross-val).
-#
-# Configs evaluated:
-#   no_depth : configs/real_01_no_depth.json            (visual hull baseline)
-#   no_edge  : configs/real_03_tsdf_no_edge_gradient.json (TSDF, no edge protection)
-#   edge     : configs/real_02_tsdf_edge_gradient.json    (TSDF, edge protection)
-#
-# Excluded from the LOO camera set:
-#   D003L, D005Z              -> depth cameras (no RGB GT)
-#   C0024, C0030, C1001       -> known bad masks (binary disables them anyway)
-#
-# Outputs -> output/loo_eval/
-#   _splits/<CAM>/              per-camera train/test calibrations
-#   <config>/<CAM>/             per-camera reconstruction + held-out render
-#   <config>/all_test/rgb_<id>.png   collected held-out renders
-#   results_<config>.json      per-camera + mean metrics
-#   summary.txt
+# Leave-one-out PSNR/SSIM/LPIPS evaluation across all color cameras
 
 set -e
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"

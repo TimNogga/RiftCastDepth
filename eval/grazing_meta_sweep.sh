@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# Grazing-rejection experiment. Fix a SMALL carve band (deep pockets) and tighten the per-camera
-# depth-gradient gate (is_depth_edge_strong) so each camera ABSTAINS on its grazing limb (steep
-# foreshortening) while still carving head-on pockets. Sweep the gradient threshold. This targets the
-# user's "not deep enough in pockets AND too much at wrong places (limb)" — a single band can't do both.
+# Grazing-rejection sweep: small carve band plus tightened per-camera depth-gradient gate
 set -e
 cd "$(dirname "$0")/.."
 CU=RIFTCast/src/riftcast/_C/external/torchhull/src/torchhull/_C/src/visual_hull_cuda.cu

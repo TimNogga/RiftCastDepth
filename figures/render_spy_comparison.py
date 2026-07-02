@@ -1,22 +1,5 @@
 #!/usr/bin/env python3
-"""
-render_spy_comparison.py – pixel-aligned front-view renders of the real VCI scene
-for the baseline / post-MC cutter / pre-MC TSDF spy comparison figure.
-
-Meshes:
-  baseline : runtime2/outputs/vci_real__original_none/frame_00000
-  tsdf     : runtime2/outputs/vci_real__mine_tsdf_real/frame_00000
-  cutter   : baseline mesh with the post-MC cutter applied (Python replica of
-             GeometryModule.cpp via figures/visualize_cutter.py, preset "real")
-
-All three are rendered with the same camera, colour range, and figure size so
-spy-zoom coordinates transfer 1:1 between panels.
-
-Usage:
-    python figures/render_spy_comparison.py                 # final renders
-    python figures/render_spy_comparison.py --scout         # angle grid to pick the view
-    python figures/render_spy_comparison.py --azim 200 --elev 10
-"""
+"""render_spy_comparison.py – pixel-aligned front-view renders of the real VCI scene"""
 
 import argparse
 import json
@@ -143,8 +126,6 @@ def depth_cam_view(cam_id: str) -> np.ndarray:
     """Render rotation matching a calibrated depth camera's viewing direction."""
     _, V = depth_cam_world_pos(cam_id)
     # GL eye coords: rows = right, up, -forward. The painter sort draws large
-    # view_z last, so keep +row2 (toward the camera) as the depth axis: faces
-    # nearest the camera are painted on top, giving the camera's own view.
     return np.stack([V[0, :3], V[1, :3], V[2, :3]])
 
 

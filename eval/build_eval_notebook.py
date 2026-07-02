@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
-"""Build output/thesis_evaluation/evaluation_figures.ipynb — one setup cell + one cell per graphic.
-Each graphic cell reproduces (and re-saves) the corresponding figure from the CSVs in data/ and the
-rendered dataset in ../../data/_dimpled_d30. Run this script to (re)generate the notebook."""
+"""Build output/thesis_evaluation/evaluation_figures.ipynb — one setup cell + one cell per graphic."""
 import json
 from pathlib import Path
 

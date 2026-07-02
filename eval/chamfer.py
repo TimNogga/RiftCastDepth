@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Symmetric Chamfer distance between a RIFTCast reconstruction and the ground-truth mesh.
-
-Handles the recon<->GT frame ambiguity (the recon output is mirrored vs the dataset/GT frame
-via cv_to_gl) by trying axis sign-flips and picking the alignment that minimises Chamfer.
-"""
+"""Symmetric Chamfer distance between a RIFTCast reconstruction and the ground-truth mesh."""
 import argparse
 import itertools
 from pathlib import Path

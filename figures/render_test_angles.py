@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""
-Render-test script – sweeps azimuth × elevation to find a good viewpoint.
-
-Uses exp 02_tsdf_edge (most detail). Each render:
-  - orthographic projection from the chosen angle
-  - height-coloured faces (world-Y) for instant depth readability
-  - Lambertian shading from a fixed key light (makes it look 3D)
-  - back-faces darkened so concavities read clearly
-
-Output: output/figuresba/render_test/azimXXX_elevYY.png
-"""
+"""Render-test script – sweeps azimuth × elevation to find a good viewpoint."""
 
 import os
 import numpy as np

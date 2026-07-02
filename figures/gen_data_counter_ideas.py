@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""Page-counter ideas that use the REAL dataset, shown intact (no dicing).
-
-Builds 4 mockup SVGs (+ PNG previews + index.html) into
-presentation/data_counter_ideas/:
-
-  A  Multi-view contact sheet  - grid of the real camera views, one lights up per slide
-  B  Camera filmstrip          - footer strip, current view centred & in colour
-  C  Pipeline progress ring    - the reconstruction render with a slide-progress ring
-  D  Dome of real views        - the dome arc, each node a real camera thumbnail
-"""
+"""Page-counter ideas that use the REAL dataset, shown intact (no dicing)."""
 import os, io, base64, glob
 from PIL import Image
 

@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Thesis 'dataset showcase' figure: ray-marched depth maps of the dimpled sphere from several
-camera angles, in one grid. Pockets appear as the deeper (farther) patches on the sphere face.
-Reads data/_dimpled_d30 (60 RGB + 30 depth). Output -> thesis_evaluation/figures/05_dataset_depth_views.png
-"""
+"""Thesis 'dataset showcase' figure: ray-marched depth maps of the dimpled sphere from several"""
 import json, math
 from pathlib import Path
 import cv2, numpy as np

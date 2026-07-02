@@ -1,11 +1,5 @@
 #!/usr/bin/env python3
-"""Generate SVG mockups of slide page-counter ideas themed around the
-RIFTCast reconstruction pipeline (visual-hull carving, depth cameras,
-TSDF scalar field, point clouds, octree, the 'Eimer' bucket dataset).
-
-No dependencies. Writes one SVG per concept + an index.html into
-presentation/counter_ideas/.
-"""
+"""Generate SVG mockups of slide page-counter ideas themed around the"""
 import os, math
 
 HERE = os.path.dirname(os.path.abspath(__file__))

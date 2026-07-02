@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Offscreen multi-view renders of the GT and reconstructions for the thesis evaluation figure.
-
-Produces, in <out-dir>:
-  gt_multiview.png            - GT from several angles
-  recon_dN_multiview.png      - each reconstruction from the same angles
-  comparison_grid.png         - rows = [GT, N=1, N=2, N=4, N=8], cols = view angles
-Reconstructions are sign-flip aligned to the GT frame so pockets line up across rows.
-"""
+"""Offscreen multi-view renders of the GT and reconstructions for the thesis evaluation figure."""
 import argparse, itertools, math, os
 os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
 from pathlib import Path

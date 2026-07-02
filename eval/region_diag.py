@@ -1,13 +1,5 @@
 #!/usr/bin/env python3
-"""Region-split reconstruction diagnostic for the dimpled sphere.
-
-Splits error into POCKET regions (near one of the 12 fibonacci pocket axes, cap half-angle ~17 deg)
-vs SMOOTH sphere, and reports BOTH directions separately:
-  - accuracy     (recon -> GT): recon points far from the true surface  => wrong-place geometry
-  - completeness (GT   -> recon): true-surface points far from the recon => missing surface
-Over-carving the convex surface shows up as SMOOTH-region error; pockets-not-deep-enough shows up as
-POCKET-region error. Auto-resolves the recon<->GT axis-flip the same way eval/chamfer.py does.
-"""
+"""Region-split reconstruction diagnostic for the dimpled sphere."""
 import argparse, itertools, math
 from pathlib import Path
 import numpy as np

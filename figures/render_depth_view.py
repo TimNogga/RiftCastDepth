@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""Render a depth-shaded view of a reconstruction mesh from a fixed viewpoint.
-
-Viewpoint is given as azimuth/elevation/distance around the mesh bbox centre
-(so every slide in a sweep shares the exact same camera). Outputs a colormapped
-depth PNG. Background (no-hit) pixels are transparent.
-"""
+"""Render a depth-shaded view of a reconstruction mesh from a fixed viewpoint."""
 import argparse, math
 from pathlib import Path
 import numpy as np

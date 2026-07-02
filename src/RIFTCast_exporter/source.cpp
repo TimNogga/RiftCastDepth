@@ -276,10 +276,7 @@ public:
                     continue;
                 }
 
-                // In strict no-depth mode, D-cameras must not contribute anything
-                // (neither masks nor depth) to make A/B comparisons unambiguous.
-                // Exception: keep them active when the post-MC cutter is enabled so it
-                // can use their depth maps even without TSDF.
+                // In no-depth mode D-cameras contribute nothing, unless the post-MC cutter needs their depth maps
                 const bool cutter_needs_depth = header.enable_depth_cutter && header.has_depth;
                 if (!depth_fusion_enabled && !cutter_needs_depth && !all_cams[i].name.empty() && all_cams[i].name[0] == 'D') {
                     cam_valid_cpu[i] = 0;
@@ -312,7 +309,7 @@ public:
             test_cameras = dataloader_test->getCameras();
         }
 
-        // --- Debug JSON: dump camera intrinsics, extrinsics, and metadata ---
+        // Dump camera intrinsics, extrinsics, and metadata as debug JSON
         {
             using json = nlohmann::json;
 
@@ -420,7 +417,6 @@ public:
                 ATCG_INFO("Wrote camera debug JSON to {}", debug_path);
             }
         }
-        // --- End debug JSON ---
 
         std::vector<float> rec_timings;
         std::vector<float> render_timings;
@@ -497,7 +493,6 @@ public:
                 std::filesystem::create_directories(output_dir + "/" + frame_folder_str + "/primitives");
                 std::filesystem::create_directories(output_dir + "/" + frame_folder_str + "/depth");
 
-                // CRITICAL INTEGRATION: Passing actual depth vector
                 auto reconstruction = geometry_module->compute_geometry(model, cam_valid, current_depths, frame_idx);
                 auto vertices = reconstruction.vertices;
                 auto faces    = reconstruction.faces;
@@ -623,7 +618,6 @@ public:
                     torch::cuda::synchronize();
                     glFlush();
                     atcg::Timer timer_reconstruction;
-                    // Passing real depth vector
                     auto reconstruction = geometry_module->compute_geometry(model, cam_valid, current_depths, frame_idx);
                     torch::cuda::synchronize();
                     glFlush();

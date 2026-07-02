@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Sweep the Curless-Levoy incidence-weight EXPONENT p in cos(theta)^p: higher p = weight face-on
-# cameras much more strongly. For each p, edit the constexpr, rebuild the exporter, and run a
-# representative depth-camera subset. Compares how p trades smooth-surface protection vs pocket carving.
+# Sweep the Curless-Levoy incidence-weight exponent p in cos(theta)^p
 set -e
 cd "$(dirname "$0")/.."
 CU=RIFTCast/src/riftcast/_C/external/torchhull/src/torchhull/_C/src/visual_hull_cuda.cu

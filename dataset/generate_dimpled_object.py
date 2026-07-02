@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""Synthetic 'dimpled sphere' dataset for the depth-camera-count ablation.
-
-Object = sphere with several concave spherical pockets carved into different sides. The pockets
-are CONCAVITIES invisible to silhouettes, so the RGB visual hull is just the smooth sphere; the
-pockets must be reconstructed from DEPTH. Pockets face all directions, so each depth camera
-(placed around the object, looking at the centre, head-on -> no grazing) reveals a different
-subset. More depth cameras -> more pockets recovered -> lower Chamfer.
-"""
+"""Synthetic 'dimpled sphere' dataset for the depth-camera-count ablation."""
 import argparse
 import json
 import math
@@ -199,8 +192,6 @@ def main():
     ap.add_argument("--pocket-radius", type=float, default=0.19)
     ap.add_argument("--pocket-offset", type=float, default=0.10)
     # NOTE: DatasetImporter only loads mask .bin files whose byte size is exactly
-    # 5328*4608 or 1920*1080 (it skips every other size -> empty visual hull). So the
-    # render resolution MUST be one the importer accepts; 1920x1080 is the practical one.
     ap.add_argument("--width", type=int, default=1920)
     ap.add_argument("--height", type=int, default=1080)
     ap.add_argument("--fx", type=float, default=1400.0)

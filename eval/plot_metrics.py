@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""
-Generate PSNR/SSIM/LPIPS comparison plots from per-experiment metrics JSONs.
-Run AFTER compute_metrics.py has produced plots/metrics/*.json
-"""
+"""Generate PSNR/SSIM/LPIPS comparison plots from per-experiment metrics JSONs."""
 from pathlib import Path
 import json
 import numpy as np

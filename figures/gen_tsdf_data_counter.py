@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""TSDF-style page counter filled with REAL data.
-
-The page number is cut out of the actual TSDF reconstruction render
-(output/spy/03_tsdf_front.png): each digit is a window onto the scalar
-field, with blocky 5x7 voxel cells. Proof of concept: renders 3 numbers.
-
-Outputs SVG + PNG into presentation/tsdf_counter/.
-"""
+"""TSDF-style page counter filled with REAL data."""
 import os, io, base64
 from PIL import Image
 

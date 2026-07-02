@@ -1,18 +1,5 @@
 #!/usr/bin/env python3
-"""
-Generate thesis evaluation figures.
-
-output/evaluation/thesis_figures/:
-  fig_01_vci_rendered_comparison.png   – cropped body views, 3 configs × 4 cameras
-  fig_02_vci_error_maps.png            – error maps, same layout
-  fig_03_vci_mesh_projections.png      – ortho projections, 3 configs × 3 views
-  fig_04_synth_mesh_projections.png    – ortho projections, 3 synth runs × 3 views (+ GT)
-  fig_05_synth_chamfer_heatmap.png     – per-vertex chamfer distance coloured
-  fig_06_depth_sensor_view.png         – what the depth camera sees
-
-Run from repo root:
-    python3 eval/generate_thesis_figures.py
-"""
+"""Generate thesis evaluation figures."""
 
 from pathlib import Path
 import numpy as np

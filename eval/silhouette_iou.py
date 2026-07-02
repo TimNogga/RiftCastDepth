@@ -1,20 +1,5 @@
 #!/usr/bin/env python3
-"""
-Silhouette re-projection consistency analysis.
-
-Compares the rendered mask (mesh reprojected into a camera) against the
-original input silhouette mask for a given camera and frame.
-
-Usage:
-    python3 eval/silhouette_iou.py
-    python3 eval/silhouette_iou.py --frame 5 --cam-id 0
-
-The rendered masks are written by the exporter to:
-    runtime/outputs/<run>/frame_XXXXX/mask/mask_<id>.png
-
-The input masks are stored in the dataset as raw uint8 binary files:
-    data/<dataset>/frame_XXXXX/mask/mask_<cam_name>.bin
-"""
+"""Silhouette re-projection consistency analysis."""
 
 import argparse
 import json

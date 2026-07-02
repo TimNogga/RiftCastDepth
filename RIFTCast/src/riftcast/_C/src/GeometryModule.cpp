@@ -388,8 +388,6 @@ GeometryModule::compute_geometry(const glm::mat4& model,
             auto invalid_depth_mask = (target_depths < kCutterDepthMin) | (target_depths > kCutterDepthMax);
 
             // Edge detection: skip carving near depth discontinuities, matching is_depth_edge_strong()
-            // in visual_hull_cuda.cu. An edge is detected when any neighbour in the window is
-            // invalid (depth < min) or differs from the window minimum by more than the threshold.
             auto not_edge = torch::ones({V}, torch::TensorOptions().dtype(torch::kBool).device(vertices.device()));
             if (cutter_edge_radius > 0) {
                 namespace F = torch::nn::functional;
@@ -398,7 +396,6 @@ GeometryModule::compute_geometry(const glm::mat4& model,
                 auto popts = F::MaxPool2dFuncOptions({k, k}).stride({1, 1}).padding({cutter_edge_radius, cutter_edge_radius});
                 auto max_d = F::max_pool2d( depth_2d, popts).squeeze(0).squeeze(0);
                 auto min_d = -F::max_pool2d(-depth_2d, popts).squeeze(0).squeeze(0);
-                // min_d < kCutterDepthMin catches invalid (0) neighbours; large range catches discontinuities
                 auto is_edge_map = (min_d < kCutterDepthMin) | ((max_d - min_d) > cutter_edge_threshold);
                 not_edge = ~is_edge_map.index({py_clamped, px_clamped});
             }
@@ -409,9 +406,7 @@ GeometryModule::compute_geometry(const glm::mat4& model,
             auto facing_dot = (temp_normals * rays).sum(1);
             auto is_facing = facing_dot < -0.1f;
 
-            // Carve condition mirrors TSDF: sdf = z_sensor - depth_w + cutter_forward_offset
-            // Positive sdf (> kCutterSdfThreshold) means the vertex is in empty air → remove it.
-            // Equivalent: depth_w < target_depths + cutter_forward_offset - kCutterSdfThreshold
+            // Carve condition mirrors the TSDF: positive sdf means the vertex sits in empty air -> remove
             auto carve_mask_subset = (~invalid_depth_mask) & not_edge & is_facing &
                                       (depth_w < (target_depths + cutter_forward_offset - kCutterSdfThreshold));
             auto should_remove = valid_mask & carve_mask_subset;
@@ -421,11 +416,9 @@ GeometryModule::compute_geometry(const glm::mat4& model,
             std::cout << "[CONCAVITY CUTTER] " << valid_cam_names[ci] << " deleted " << should_remove.sum().item().toInt() << " vertices." << std::endl;
         }
 
-        // Apply deletion
         int vertices_before = vertices.size(0);
         vertices = vertices.index({keep_mask});
 
-        // Remap faces
         auto old_to_new = torch::full({vertices_before}, -1, torch::TensorOptions().dtype(torch::kInt64).device(vertices.device()));
         auto new_indices = torch::arange(vertices.size(0), torch::TensorOptions().dtype(torch::kInt64).device(vertices.device()));
         old_to_new.index_put_({keep_mask}, new_indices);

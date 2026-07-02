@@ -1,28 +1,5 @@
 #!/usr/bin/env python3
-"""
-visualize_cutter.py  –  show which depth camera cuts which vertices post-marching-cubes.
-
-Outputs:
-  <out>.obj  – vertex-colored OBJ (v x y z r g b) readable in MeshLab / Blender
-  <out>.png  – rendered PNG at azim=270° elev=60° (same angle as render_figuresba.py)
-
-Color key (both formats):
-  gray    = kept
-  red     = cut by D003L only
-  blue    = cut by D005Z only
-  magenta = cut by both cameras
-
-Usage:
-    python figures/visualize_cutter.py \\
-        --config  configs/config_vci.json \\
-        --vertices output/comparative_study/exp_03_depth_cutter/frame_00000/vertices.bin \\
-        --faces    output/comparative_study/exp_03_depth_cutter/frame_00000/faces.bin \\
-        --frame 0 \\
-        --out   /tmp/cutter_viz
-
-The script resolves all relative paths from the RIFTCast project root
-(the directory containing this figures/ folder).
-"""
+"""visualize_cutter.py  –  show which depth camera cuts which vertices post-marching-cubes."""
 
 import argparse
 import json

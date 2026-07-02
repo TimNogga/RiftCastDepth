@@ -1,28 +1,5 @@
 #!/usr/bin/env python3
-"""
-Depth-camera count sweep on the synthetic open-box dataset.
-
-For a fixed set of RGB cameras (visual hull) we progressively add depth cameras
-(1 … N_MAX), reconstruct the mesh with the exporter for each count, and measure
-the Chamfer distance to the parametric ground-truth open box.
-
-The open box is concave (one open face) so the RGB visual hull can never carve
-the interior cavity — only depth fusion can. This sweep therefore shows how the
-geometric error drops as more depth sensors observe the cavity.
-
-Pipeline per camera count N:
-    1. write a calibration containing all RGB cams + the first N depth cams
-    2. run RIFTCast_exporter (TSDF, synthetic depth fusion) -> vertices.bin
-    3. sample the mesh + GT box and compute bidirectional Chamfer distance
-
-Run from repo root:
-    .venv/bin/python3 eval/depth_count_sweep.py
-
-Stages can be run independently:
-    --skip-gen      reuse an existing data/depth_sweep dataset
-    --skip-runs     reuse existing reconstructions, only (re)compute metrics+plot
-    --counts 1 5 10 20   only evaluate these depth-camera counts
-"""
+"""Depth-camera count sweep on the synthetic open-box dataset."""
 
 from __future__ import annotations
 
@@ -62,8 +39,6 @@ N_SAMPLES = 200_000            # surface points sampled per mesh for chamfer
 F_THRESHOLDS = [0.005, 0.01, 0.02, 0.05]
 
 # The exporter binary was built against the `riftcast` conda env's libtorch
-# (torch 2.10.0+cu126). That env's torch/lib must be on LD_LIBRARY_PATH or the
-# binary hits an undefined-symbol error against any newer torch on the system.
 TORCH_LIB = "/home/timnogga/anaconda3/envs/riftcast/lib/python3.12/site-packages/torch/lib"
 EXPORTER_PREFIX = [
     "xvfb-run", "-a", "-e", "/dev/stdout", "-s", "-screen 0 1280x720x24",
@@ -206,9 +181,6 @@ def generate_dataset(depth_positions: list[np.ndarray]):
         depth_m = gsd.render_open_box_depth(pos.astype(np.float32), ray_w, ray_cam, walls)
         gsd.save_rgb(frame_dir / "rgb" / f"{cid}.jpg", np.full((H, W), 255, np.uint8))
         # 16-bit PNG depth in mm. We deliberately avoid .pth: the exporter loads
-        # torch pickles with its build-time torch (2.10) and chokes on tensors
-        # saved by a newer torch. PNG depth (uint16 mm /scale -> metres) is
-        # version-independent and the importer falls back to it when no .pth exists.
         gsd.save_depth_png_mm(frame_dir / "depth" / f"{cid}.png", depth_m)
         gsd.save_depth_preview_jpg(frame_dir / "depth_preview" / f"{cid}.jpg", depth_m)
         print(f"  depth {cid}  pos=({pos[0]:+.2f},{pos[1]:+.2f},{pos[2]:+.2f})")

@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
-# Meta-sweep: for each carve-band value, patch the constexpr, rebuild the exporter, and run the
-# dimpled depth-camera sweep (reusing datasets). Produces one results folder per band so we can see
-# whether a LARGER band flattens the (currently anti-monotonic) chamfer-vs-cameras curve.
+# Meta-sweep over the carve-band value: patch the constexpr, rebuild the exporter, rerun the dimpled sweep
 set -e
 cd "$(dirname "$0")/.."
 CU=RIFTCast/src/riftcast/_C/external/torchhull/src/torchhull/_C/src/visual_hull_cuda.cu

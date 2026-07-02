@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 # "NO VOTING" test sweep: kPositiveSdfThresholdMeters = 0 -> any positive SDF carves, no veto.
-# Reuses the already-generated dimpled-sphere datasets/configs (no re-render) and the shared GT.
-# Everything lands in a single fresh folder for easy inspection; one .obj per depth count.
 set -e
 cd "$(dirname "$0")/.."
 

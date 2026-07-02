@@ -8,11 +8,6 @@ for cam in data["cameras"]:
     if "intrinsics" in cam:
         cam["intrinsics"]["resolution"] = [4608, 5328]
         # We also need to scale the principal point and focal length by the resize factor
-        # Original: W=2664, H=2304 (Note: resize was to 4608, 5328? Wait OpenCV: w*2=2664*2=5328, h*2=2304*2=4608)
-        # But wait! I rotated it! 
-        # width = 2304*2 = 4608
-        # height = 2664*2 = 5328
-        # We MUST rotate the intrinsics matrix!
         
         fx = cam["intrinsics"]["camera_matrix"][0]
         fy = cam["intrinsics"]["camera_matrix"][4]
@@ -20,8 +15,6 @@ for cam in data["cameras"]:
         cy = cam["intrinsics"]["camera_matrix"][5]
 
         # 1. Rotate 90 degrees clockwise
-        # new_cx = H - cy, new_cy = cx
-        # new_fx = fy, new_fy = fx
         new_cx = 2304 - cy
         new_cy = cx
         new_fx = fy

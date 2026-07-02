@@ -1,17 +1,5 @@
 #!/usr/bin/env python3
-"""
-Synthetic dataset evaluation – compares reconstructed renders against GT images.
-
-Three runs evaluated (synthetic_open_cube_8cams, frame 0):
-  no_depth   – visual hull, no depth
-  real_data  – TSDF, real-data preset
-  synth_data – TSDF, synthetic-data preset
-
-Run from repo root:
-    python3 eval/evaluate_synthetic.py
-
-Outputs go to output/evaluation/synthetic/.
-"""
+"""Synthetic dataset evaluation – compares reconstructed renders against GT images."""
 
 from pathlib import Path
 import json

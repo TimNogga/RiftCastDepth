@@ -83,8 +83,6 @@ cameras = []
 camera_distance = 3.0
 
 # 4 Cameras positioned in a dome structure
-# Cam 1: Look down from top (Can see concavity)
-# Cam 2,3,4: Side views at slight elevation (See mostly profile)
 angles = [
     (0, 80),   # Top camera (looking almost straight down)
     (0, 20),   # Front-side
@@ -141,8 +139,6 @@ for i, (azimuth, elevation) in enumerate(angles):
     ray_w = np.einsum('hwc, cd -> hwd', ray_c_dir, R_wc)
     
     # --- Intersect with the Bowl ---
-    # The bowl is a hemisphere where Y < 0
-    # Outer sphere intersection
     hit_outer, t1_out, t2_out = ray_sphere_intersect(cam_pos, ray_w, bowl_center, bowl_radius)
     # Inner sphere intersection
     hit_inner, t1_in, t2_in = ray_sphere_intersect(cam_pos, ray_w, bowl_center, bowl_radius - bowl_thickness)
@@ -159,9 +155,6 @@ for i, (azimuth, elevation) in enumerate(angles):
     valid_p1_in = hit_inner & (p1_in[..., 1] <= 0)
     
     # The logic:
-    # 1. If we hit the outer shell first, that's our depth.
-    # 2. If we hit the flat top "rim" (Y=0 between inner and outer radius)
-    # 3. If we go through the top opening and hit the inner shell.
     
     t_final = np.full((H, W), np.inf)
     

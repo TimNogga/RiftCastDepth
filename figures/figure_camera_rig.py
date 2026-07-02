@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Camera-rig figure: 3D layout of the 30 depth cameras (and the 60 RGB cameras) around the object.
-Depth cameras are coloured by their nested farthest-point order (0..29). No on-figure description.
-Output -> thesis_evaluation/figures/06_camera_rig.png
-"""
+"""Camera-rig figure: 3D layout of the 30 depth cameras (and the 60 RGB cameras) around the object."""
 import json
 from pathlib import Path
 import numpy as np

@@ -1,22 +1,5 @@
 #!/usr/bin/env python3
-"""
-Compute PSNR / SSIM / LPIPS between rendered views and GT images.
-
-Usage:
-    python3 eval/compute_metrics.py \
-        --pred  output/contamination_test/run_b/frame_00000/test \
-        --gt    data/2026_03_20_orbbec_002_standard/frame_00000/rgb \
-        --mask  data/2026_03_20_orbbec_002_standard/frame_00000/mask \
-        --cams  5 26 37 \
-        --label "run_b (clean hold-out)"
-
-    # pred dir can be:
-    #   frame_XXXXX/test/     -> rendered test views (rgb_<id>.png)
-    #   frame_XXXXX/rgb/      -> regular renders (rgb_<id>.png)
-    #
-    # GT dir: frame_XXXXX/rgb/ containing C<name>.png
-    # mask dir: frame_XXXXX/mask/ containing mask_C<name>.bin  (binary uint8, 5328*4608)
-"""
+"""Compute PSNR / SSIM / LPIPS between rendered views and GT images."""
 
 import argparse
 import json
