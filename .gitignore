@@ -80,6 +80,11 @@ _previews/
 # Runtime sweep outputs
 /runtime/logs/
 /runtime/outputs/
+/runtime2/
+
+# Experiment and presentation outputs (generated)
+/output/
+/presentation/
 
 # Script-generated artifacts
 /scripts/__pycache__/

@@ -34,13 +34,23 @@ int parseDepthFusionPreset(const std::string& raw_mode)
     {
         return static_cast<int>(torchhull::DepthFusionPreset::SyntheticData);
     }
+    if(mode == "real_no_edge" || mode == "realnoedge" || mode == "real_no_gradient")
+    {
+        return static_cast<int>(torchhull::DepthFusionPreset::RealDataNoEdge);
+    }
+    if(mode == "synth_no_edge" || mode == "synthnoedge" || mode == "synthetic_no_edge")
+    {
+        return static_cast<int>(torchhull::DepthFusionPreset::SyntheticNoEdge);
+    }
     return static_cast<int>(torchhull::DepthFusionPreset::RealData);
 }
 
 const char* depthFusionPresetToString(const int preset)
 {
-    if(preset == static_cast<int>(torchhull::DepthFusionPreset::NoDepth)) return "none";
-    if(preset == static_cast<int>(torchhull::DepthFusionPreset::SyntheticData)) return "synthetic";
+    if(preset == static_cast<int>(torchhull::DepthFusionPreset::NoDepth))         return "none";
+    if(preset == static_cast<int>(torchhull::DepthFusionPreset::SyntheticData))   return "synthetic";
+    if(preset == static_cast<int>(torchhull::DepthFusionPreset::RealDataNoEdge))  return "real_no_edge";
+    if(preset == static_cast<int>(torchhull::DepthFusionPreset::SyntheticNoEdge)) return "synth_no_edge";
     return "real";
 }
 } // namespace
@@ -324,55 +334,90 @@ GeometryModule::compute_geometry(const glm::mat4& model,
         temp_normals = temp_normals / (torch::norm(temp_normals, 2, 1, true) + 1e-8f);
         
         auto keep_mask = torch::ones({vertices.size(0)}, torch::TensorOptions().dtype(torch::kBool).device(vertices.device()));
-        auto origin_clip_homo_64 = torch::tensor({0.0, 0.0, 1.0, 0.0}, torch::TensorOptions().dtype(torch::kFloat64).device(vertices.device()));
 
         int n_valid = (int)proj_full.size(0);
-        for (int ci = 0; ci < n_valid; ++ci) 
+        const bool run_cutter = impl->dataloader->enable_depth_cutter();
+
+        // Match TSDF preset parameters from visual_hull_cuda.cu
+        const bool is_synth_preset = (impl->depth_fusion_preset == static_cast<int>(torchhull::DepthFusionPreset::SyntheticData)
+                                   || impl->depth_fusion_preset == static_cast<int>(torchhull::DepthFusionPreset::SyntheticNoEdge));
+        const bool no_edge_preset  = (impl->depth_fusion_preset == static_cast<int>(torchhull::DepthFusionPreset::RealDataNoEdge)
+                                   || impl->depth_fusion_preset == static_cast<int>(torchhull::DepthFusionPreset::SyntheticNoEdge));
+        const float kCutterDepthMin       = 0.1f;
+        const float kCutterDepthMax       = 3.95f;
+        const float kCutterSdfThreshold   = 0.01f;
+        const float cutter_forward_offset = is_synth_preset ? 0.02f : 0.24f;
+        const int   cutter_edge_radius    = no_edge_preset  ? 0 : (is_synth_preset ? 2 : 10);
+        const float cutter_edge_threshold = is_synth_preset ? 0.06f : 0.04f;
+
+        for (int ci = 0; ci < n_valid && run_cutter; ++ci)
         {
-            if (valid_cam_names[ci].empty() || valid_cam_names[ci][0] != 'D') continue; 
-            
+            if (valid_cam_names[ci].empty() || valid_cam_names[ci][0] != 'D') continue;
+
             int orig_cam_idx = valid_cam_indices[ci];
             auto P = proj_full[ci];
-            
-            auto P_64 = P.to(torch::kFloat64);
-            auto P_inv_64 = torch::inverse(P_64);
-            auto cam_pos_homo_64 = torch::matmul(P_inv_64, origin_clip_homo_64);
-            auto cam_pos = (cam_pos_homo_64.to(torch::kFloat32)).slice(0, 0, 3) / cam_pos_homo_64[3].to(torch::kFloat32);
-            
+
+            // Use actual world-space camera centre instead of the broken P_inv extraction.
+            glm::vec3 cam_center = impl->cameras[valid_cam_indices[ci]].cam->getExtrinsics().position();
+            auto cam_pos = torch::tensor({cam_center.x, cam_center.y, cam_center.z},
+                                         torch::TensorOptions().dtype(torch::kFloat32).device(vertices.device()));
+
             auto raw_depth = depths[orig_cam_idx].to(vertices.device(), torch::kFloat32);
-            raw_depth = raw_depth.flip({0}); 
-            
+            // Ensure 3D [H,W,1] for uniform indexing
+            if (raw_depth.dim() == 2) raw_depth = raw_depth.unsqueeze(-1);
+            raw_depth = raw_depth.flip({0});
+
             int raw_H = raw_depth.size(0);
             int raw_W = raw_depth.size(1);
-            
+
             auto V = vertices.size(0);
             auto hom_verts = torch::cat({vertices, torch::ones({V, 1}, vertices.options())}, 1);
             auto clip_space = torch::matmul(P, hom_verts.t()).t();
             auto depth_w = clip_space.select(1, 3);
             auto ndc_x = clip_space.select(1, 0) / depth_w;
             auto ndc_y = clip_space.select(1, 1) / depth_w;
-            
+
             auto pixel_x = ((ndc_x + 1.0f) * 0.5f * raw_W).to(torch::kInt64);
-            auto pixel_y = ((1.0f - ndc_y) * 0.5f * raw_H).to(torch::kInt64); 
-            
-            auto valid_mask = (pixel_x >= 0) & (pixel_x < raw_W) & (pixel_y >= 0) & (pixel_y < raw_H) & (depth_w > 0.1f);
+            auto pixel_y = ((1.0f - ndc_y) * 0.5f * raw_H).to(torch::kInt64);
+
+            auto valid_mask = (pixel_x >= 0) & (pixel_x < raw_W) & (pixel_y >= 0) & (pixel_y < raw_H) & (depth_w > kCutterDepthMin);
             auto px_clamped = pixel_x.clamp(0, raw_W - 1);
             auto py_clamped = pixel_y.clamp(0, raw_H - 1);
-            
+
             auto target_depths = raw_depth.index({py_clamped, px_clamped, 0});
-            auto invalid_depth_mask = (target_depths < 0.1f) | (target_depths > 3.9f);
-            
+            auto invalid_depth_mask = (target_depths < kCutterDepthMin) | (target_depths > kCutterDepthMax);
+
+            // Edge detection: skip carving near depth discontinuities, matching is_depth_edge_strong()
+            // in visual_hull_cuda.cu. An edge is detected when any neighbour in the window is
+            // invalid (depth < min) or differs from the window minimum by more than the threshold.
+            auto not_edge = torch::ones({V}, torch::TensorOptions().dtype(torch::kBool).device(vertices.device()));
+            if (cutter_edge_radius > 0) {
+                namespace F = torch::nn::functional;
+                auto depth_2d = raw_depth.select(2, 0).unsqueeze(0).unsqueeze(0); // [1,1,H,W]
+                const int k = 2 * cutter_edge_radius + 1;
+                auto popts = F::MaxPool2dFuncOptions({k, k}).stride({1, 1}).padding({cutter_edge_radius, cutter_edge_radius});
+                auto max_d = F::max_pool2d( depth_2d, popts).squeeze(0).squeeze(0);
+                auto min_d = -F::max_pool2d(-depth_2d, popts).squeeze(0).squeeze(0);
+                // min_d < kCutterDepthMin catches invalid (0) neighbours; large range catches discontinuities
+                auto is_edge_map = (min_d < kCutterDepthMin) | ((max_d - min_d) > cutter_edge_threshold);
+                not_edge = ~is_edge_map.index({py_clamped, px_clamped});
+            }
+
             auto rays = vertices - cam_pos.unsqueeze(0);
             rays = rays / (torch::norm(rays, 2, 1, true) + 1e-8f);
-            
+
             auto facing_dot = (temp_normals * rays).sum(1);
-            auto is_facing = facing_dot < -0.4f;
-            
-            auto carve_mask_subset = (~invalid_depth_mask) & is_facing & ((depth_w + 1000.0f) < (target_depths - 0.02f)); 
+            auto is_facing = facing_dot < -0.1f;
+
+            // Carve condition mirrors TSDF: sdf = z_sensor - depth_w + cutter_forward_offset
+            // Positive sdf (> kCutterSdfThreshold) means the vertex is in empty air → remove it.
+            // Equivalent: depth_w < target_depths + cutter_forward_offset - kCutterSdfThreshold
+            auto carve_mask_subset = (~invalid_depth_mask) & not_edge & is_facing &
+                                      (depth_w < (target_depths + cutter_forward_offset - kCutterSdfThreshold));
             auto should_remove = valid_mask & carve_mask_subset;
-            
+
             keep_mask = keep_mask & (~should_remove);
-            
+
             std::cout << "[CONCAVITY CUTTER] " << valid_cam_names[ci] << " deleted " << should_remove.sum().item().toInt() << " vertices." << std::endl;
         }
 

@@ -50,11 +50,13 @@ struct DatasetHeader
     float sigma                 = 2.0f;
 
     // params for the depth data if available
-    bool has_depth              = false;    
-    float depth_scale           = 1000.0f; 
-    std::string depth_extension = ".png";   
-    // One of: "none", "real", "synthetic".
+    bool has_depth              = false;
+    float depth_scale           = 1000.0f;
+    std::string depth_extension = ".png";
+    // One of: "none", "real", "synthetic", "real_no_edge", "synth_no_edge".
     std::string depth_fusion_mode = "real";
+    // Whether to run the post-marching-cubes concavity cutter in GeometryModule.
+    bool enable_depth_cutter    = true;
 
     inline std::string type_to_string() const
     {
@@ -283,6 +285,7 @@ public:
     inline float depth_scale() const { return _header.depth_scale; }
     inline const std::string& depth_extension() const { return _header.depth_extension; }
     inline const std::string& depth_fusion_mode() const { return _header.depth_fusion_mode; }
+    inline bool enable_depth_cutter() const { return _header.enable_depth_cutter; }
 
 protected:
     /**

@@ -10,9 +10,11 @@ namespace torchhull
 
 enum class DepthFusionPreset : int
 {
-    NoDepth = 0,
-    RealData = 1,
-    SyntheticData = 2,
+    NoDepth           = 0,
+    RealData          = 1,
+    SyntheticData     = 2,
+    RealDataNoEdge    = 3,  // RealData but edge-gradient shielding disabled
+    SyntheticNoEdge   = 4,  // SyntheticData but edge-gradient shielding disabled
 };
 
 std::tuple<torch::Tensor, torch::Tensor>

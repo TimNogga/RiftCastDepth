@@ -35,6 +35,14 @@ std::string normalizeDepthFusionMode(std::string mode)
     {
         return "real";
     }
+    if(mode == "real_no_edge" || mode == "realnoedge" || mode == "real_no_gradient")
+    {
+        return "real_no_edge";
+    }
+    if(mode == "synth_no_edge" || mode == "synthnoedge" || mode == "synthetic_no_edge")
+    {
+        return "synth_no_edge";
+    }
     return "real";
 }
 } // namespace
@@ -116,9 +124,10 @@ DatasetHeader IO::readDatasetHeader(const nlohmann::json& data)
     }
     if(data.contains("depth"))
     {
-        header.has_depth       = data["depth"].value("has_depth", false);
-        header.depth_scale     = data["depth"].value("scale", 1000.0f); 
-        header.depth_extension = data["depth"].value("extension", ".png");
+        header.has_depth            = data["depth"].value("has_depth", false);
+        header.depth_scale          = data["depth"].value("scale", 1000.0f);
+        header.depth_extension      = data["depth"].value("extension", ".png");
+        header.enable_depth_cutter  = data["depth"].value("enable_cutter", true);
     }
 
     return header;
@@ -462,8 +471,13 @@ std::vector<torch::Tensor> VCIDatasetImporter::getDepths(const uint32_t frame_id
 void VCIDatasetImporter::importCameras(const std::string& camera_config)
 {
     json data;
-    std::string config_path = _root_path + "/calibration_dome.json";
-    
+    // Resolve camera_config: if it's an absolute path use it directly,
+    // otherwise treat it as relative to the dataset root.
+    std::filesystem::path p(camera_config);
+    std::string config_path = p.is_absolute()
+        ? camera_config
+        : _root_path + "/" + camera_config;
+
     std::fstream f(config_path);
     if(!f.is_open()) return;
     try { data = json::parse(f); } catch(...) { return; }

@@ -278,7 +278,10 @@ public:
 
                 // In strict no-depth mode, D-cameras must not contribute anything
                 // (neither masks nor depth) to make A/B comparisons unambiguous.
-                if (!depth_fusion_enabled && !all_cams[i].name.empty() && all_cams[i].name[0] == 'D') {
+                // Exception: keep them active when the post-MC cutter is enabled so it
+                // can use their depth maps even without TSDF.
+                const bool cutter_needs_depth = header.enable_depth_cutter && header.has_depth;
+                if (!depth_fusion_enabled && !cutter_needs_depth && !all_cams[i].name.empty() && all_cams[i].name[0] == 'D') {
                     cam_valid_cpu[i] = 0;
                     disabled_depth_cams++;
                 }
@@ -430,7 +433,8 @@ public:
             std::string frame_folder_str = frame_folder.str();
 
             std::vector<torch::Tensor> current_depths;
-            if(depth_fusion_enabled && dataloader->has_depth())
+            const bool need_depths = depth_fusion_enabled || (header.enable_depth_cutter && header.has_depth);
+            if(need_depths && dataloader->has_depth())
             {
                 current_depths = dataloader->getDepths(frame_idx, cam_valid);
 
@@ -601,7 +605,6 @@ public:
             {
                 std::filesystem::create_directories(output_dir + "/" + frame_folder_str + "/test");
 
-                // Original Warmup Loop (Preserved)
                 for(int i = 0; i < 10; ++i)
                 {
                     auto reconstruction = geometry_module->compute_geometry(model, cam_valid, current_depths, frame_idx);
