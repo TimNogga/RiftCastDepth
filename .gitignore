@@ -87,9 +87,10 @@ _previews/
 /presentation/
 
 # Script-generated artifacts
-/scripts/__pycache__/
-/scripts/thesis_output_angles/
-/scripts/ground_truth_open_box.obj
+/figures/thesis_output_angles/
+
+# Tracked result meshes (exception to the global *.obj rule)
+!/results/**/*.obj
 
 # Third-party external trees with local/generated assets
 /RIFTCast/src/riftcast/_C/external/atcg_lib/external/
@@ -104,6 +105,6 @@ _previews/
 
 # Local-only helper files
 docs/processed_README.md
-scripts/debug_masks.py
+dataset/debug_masks.py
 config_vci_2.json
 bachelor_visualizations.ipynb
